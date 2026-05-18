@@ -1,0 +1,15 @@
+package com.yhl.rag.llm;
+
+public enum LlmErrorType {
+
+    API_KEY_MISSING,
+    INPUT_TOO_LONG,
+    HTTP_ERROR,
+    TIMEOUT,
+    EMPTY_RESPONSE_BODY,
+    EMPTY_OUTPUT,
+    EMPTY_CHOICES,
+    EMPTY_MESSAGE_CONTENT,
+    INVALID_STRUCTURED_OUTPUT,
+    CLIENT_ERROR
+}

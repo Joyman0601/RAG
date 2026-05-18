@@ -1,0 +1,4 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Mon May 18 10:49:29 CST 2026
+@default-central-https\://repo.maven.apache.org/maven2/.lastUpdated=1779072569045
+https\://repo.maven.apache.org/maven2/.error=Could not transfer artifact org.jetbrains.kotlin\:kotlin-maven-plugin\:pom\:1.9.25 from/to central (https\://repo.maven.apache.org/maven2)\: transfer failed for https\://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-maven-plugin/1.9.25/kotlin-maven-plugin-1.9.25.pom
