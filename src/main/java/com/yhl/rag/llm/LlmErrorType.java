@@ -3,6 +3,7 @@ package com.yhl.rag.llm;
 public enum LlmErrorType {
 
     API_KEY_MISSING,
+    EMBEDDING_CONFIG_MISSING,
     INPUT_TOO_LONG,
     HTTP_ERROR,
     TIMEOUT,
@@ -10,6 +11,7 @@ public enum LlmErrorType {
     EMPTY_OUTPUT,
     EMPTY_CHOICES,
     EMPTY_MESSAGE_CONTENT,
+    EMPTY_EMBEDDING,
     INVALID_STRUCTURED_OUTPUT,
     CLIENT_ERROR
 }

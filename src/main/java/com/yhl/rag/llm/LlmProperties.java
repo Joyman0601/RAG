@@ -21,6 +21,14 @@ public class LlmProperties {
 
     private int maxInputChars = 2000;
 
+    private String embeddingBaseUrl;
+
+    private String embeddingApiKey;
+
+    private String embeddingModel = "text-embedding-3-small";
+
+    private int embeddingTimeout = 30;
+
     private String proxyHost;
 
     private int proxyPort;
@@ -79,6 +87,38 @@ public class LlmProperties {
 
     public void setMaxInputChars(int maxInputChars) {
         this.maxInputChars = maxInputChars;
+    }
+
+    public String getEmbeddingBaseUrl() {
+        return embeddingBaseUrl;
+    }
+
+    public void setEmbeddingBaseUrl(String embeddingBaseUrl) {
+        this.embeddingBaseUrl = embeddingBaseUrl;
+    }
+
+    public String getEmbeddingApiKey() {
+        return embeddingApiKey;
+    }
+
+    public void setEmbeddingApiKey(String embeddingApiKey) {
+        this.embeddingApiKey = embeddingApiKey;
+    }
+
+    public String getEmbeddingModel() {
+        return embeddingModel;
+    }
+
+    public void setEmbeddingModel(String embeddingModel) {
+        this.embeddingModel = embeddingModel;
+    }
+
+    public int getEmbeddingTimeout() {
+        return embeddingTimeout;
+    }
+
+    public void setEmbeddingTimeout(int embeddingTimeout) {
+        this.embeddingTimeout = embeddingTimeout;
     }
 
     public String getProxyHost() {

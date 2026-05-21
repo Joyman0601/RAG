@@ -5,6 +5,16 @@ spring:
   application:
     name: rag-learning
 
+rag:
+  debug-enabled: ${RAG_DEBUG_ENABLED:false}
+  chunk-size: ${RAG_CHUNK_SIZE:600}
+  chunk-overlap: ${RAG_CHUNK_OVERLAP:100}
+  search:
+    top-k: ${RAG_SEARCH_TOP_K:3}
+    score-threshold: ${RAG_SEARCH_SCORE_THRESHOLD:0.3}
+  context:
+    max-chars: ${RAG_CONTEXT_MAX_CHARS:3000}
+
 llm:
   api-key: ${LLM_API_KEY:}
   base-url: ${LLM_BASE_URL:https://co.yes.vg}
@@ -13,5 +23,9 @@ llm:
   timeout-seconds: ${LLM_TIMEOUT_SECONDS:30}
   max-output-tokens: ${LLM_MAX_OUTPUT_TOKENS:800}
   max-input-chars: ${LLM_MAX_INPUT_CHARS:2000}
+  embedding-base-url: ${LLM_EMBEDDING_BASE_URL:}
+  embedding-api-key: ${LLM_EMBEDDING_API_KEY:}
+  embedding-model: ${LLM_EMBEDDING_MODEL:text-embedding-3-small}
+  embedding-timeout: ${LLM_EMBEDDING_TIMEOUT:30}
   proxy-host: ${LLM_PROXY_HOST:}
   proxy-port: ${LLM_PROXY_PORT:0}

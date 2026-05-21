@@ -6,9 +6,19 @@ public class RagSource {
 
     private String title;
 
-    private int score;
+    private double score;
 
     private String snippet;
+
+    private Integer index;
+
+    private String documentId;
+
+    private String filename;
+
+    private String chunkId;
+
+    private Integer chunkIndex;
 
     public RagSource() {
     }
@@ -18,6 +28,15 @@ public class RagSource {
         this.title = title;
         this.score = score;
         this.snippet = snippet;
+    }
+
+    public RagSource(Integer index, String documentId, String filename, String chunkId, Integer chunkIndex, double score) {
+        this.index = index;
+        this.documentId = documentId;
+        this.filename = filename;
+        this.chunkId = chunkId;
+        this.chunkIndex = chunkIndex;
+        this.score = score;
     }
 
     public String getId() {
@@ -36,11 +55,11 @@ public class RagSource {
         this.title = title;
     }
 
-    public int getScore() {
+    public double getScore() {
         return score;
     }
 
-    public void setScore(int score) {
+    public void setScore(double score) {
         this.score = score;
     }
 
@@ -50,5 +69,45 @@ public class RagSource {
 
     public void setSnippet(String snippet) {
         this.snippet = snippet;
+    }
+
+    public Integer getIndex() {
+        return index;
+    }
+
+    public void setIndex(Integer index) {
+        this.index = index;
+    }
+
+    public String getDocumentId() {
+        return documentId;
+    }
+
+    public void setDocumentId(String documentId) {
+        this.documentId = documentId;
+    }
+
+    public String getFilename() {
+        return filename;
+    }
+
+    public void setFilename(String filename) {
+        this.filename = filename;
+    }
+
+    public String getChunkId() {
+        return chunkId;
+    }
+
+    public void setChunkId(String chunkId) {
+        this.chunkId = chunkId;
+    }
+
+    public Integer getChunkIndex() {
+        return chunkIndex;
+    }
+
+    public void setChunkIndex(Integer chunkIndex) {
+        this.chunkIndex = chunkIndex;
     }
 }
