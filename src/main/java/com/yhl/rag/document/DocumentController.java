@@ -6,9 +6,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,6 +30,19 @@ public class DocumentController {
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public DocumentInfo upload(@NotNull(message = "file cannot be null") @RequestPart("file") MultipartFile file) {
         return documentService.upload(file);
+    }
+
+    @PutMapping(value = "/{documentId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public DocumentInfo update(
+            @NotBlank(message = "documentId cannot be blank") @PathVariable String documentId,
+            @NotNull(message = "file cannot be null") @RequestPart("file") MultipartFile file
+    ) {
+        return documentService.update(documentId, file);
+    }
+
+    @DeleteMapping("/{documentId}")
+    public DocumentInfo delete(@NotBlank(message = "documentId cannot be blank") @PathVariable String documentId) {
+        return documentService.delete(documentId);
     }
 
     @GetMapping

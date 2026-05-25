@@ -51,6 +51,10 @@ public class LlmClient {
     }
 
     public String generate(String instructions, List<LlmMessage> input) {
+        return generateWithUsage(instructions, input).getAnswer();
+    }
+
+    public LlmGenerationResult generateWithUsage(String instructions, List<LlmMessage> input) {
         long startNanos = System.nanoTime();
         int inputChars = inputChars(input);
 
@@ -108,7 +112,12 @@ public class LlmClient {
         }
 
         logSuccess(startNanos, inputChars, charLength(answer));
-        return answer;
+        return new LlmGenerationResult(
+                answer,
+                promptTokens(response),
+                completionTokens(response),
+                totalTokens(response)
+        );
     }
 
     public void streamChat(String systemPrompt, String message, SseEmitter emitter) {
@@ -297,6 +306,33 @@ public class LlmClient {
                 ));
     }
 
+    private static Integer promptTokens(ResponsesResponse response) {
+        if (response == null || response.usage() == null) {
+            return null;
+        }
+        if (response.usage().inputTokens() != null) {
+            return response.usage().inputTokens();
+        }
+        return response.usage().promptTokens();
+    }
+
+    private static Integer completionTokens(ResponsesResponse response) {
+        if (response == null || response.usage() == null) {
+            return null;
+        }
+        if (response.usage().outputTokens() != null) {
+            return response.usage().outputTokens();
+        }
+        return response.usage().completionTokens();
+    }
+
+    private static Integer totalTokens(ResponsesResponse response) {
+        if (response == null || response.usage() == null) {
+            return null;
+        }
+        return response.usage().totalTokens();
+    }
+
     private static String normalizeBaseUrl(String baseUrl) {
         if (!StringUtils.hasText(baseUrl)) {
             return "";
@@ -440,12 +476,25 @@ public class LlmClient {
     ) {
     }
 
-    private record ResponsesResponse(@JsonProperty("output_text") String outputText, List<ResponseOutput> output) {
+    private record ResponsesResponse(
+            @JsonProperty("output_text") String outputText,
+            List<ResponseOutput> output,
+            ResponseUsage usage
+    ) {
     }
 
     private record ResponseOutput(List<ResponseContent> content) {
     }
 
     private record ResponseContent(String type, String text) {
+    }
+
+    private record ResponseUsage(
+            @JsonProperty("input_tokens") Integer inputTokens,
+            @JsonProperty("output_tokens") Integer outputTokens,
+            @JsonProperty("prompt_tokens") Integer promptTokens,
+            @JsonProperty("completion_tokens") Integer completionTokens,
+            @JsonProperty("total_tokens") Integer totalTokens
+    ) {
     }
 }

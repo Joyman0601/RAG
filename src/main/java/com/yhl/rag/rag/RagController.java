@@ -19,11 +19,18 @@ public class RagController {
     private final RagService ragService;
     private final RagSearchService ragSearchService;
     private final RagAskService ragAskService;
+    private final RagEvalService ragEvalService;
 
-    public RagController(RagService ragService, RagSearchService ragSearchService, RagAskService ragAskService) {
+    public RagController(
+            RagService ragService,
+            RagSearchService ragSearchService,
+            RagAskService ragAskService,
+            RagEvalService ragEvalService
+    ) {
         this.ragService = ragService;
         this.ragSearchService = ragSearchService;
         this.ragAskService = ragAskService;
+        this.ragEvalService = ragEvalService;
     }
 
     @PostMapping("/documents")
@@ -55,5 +62,10 @@ public class RagController {
             @RequestParam(name = "debug", defaultValue = "false") boolean debug
     ) {
         return ragAskService.ask(request.getQuestion(), debug);
+    }
+
+    @GetMapping("/eval")
+    public RagEvalResponse eval(@RequestParam(name = "onlySearch", defaultValue = "false") boolean onlySearch) {
+        return ragEvalService.evaluate(onlySearch);
     }
 }

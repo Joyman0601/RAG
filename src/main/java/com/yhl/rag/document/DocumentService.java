@@ -2,10 +2,13 @@ package com.yhl.rag.document;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -16,6 +19,8 @@ import java.util.concurrent.ConcurrentMap;
 import com.yhl.rag.llm.EmbeddingClient;
 import com.yhl.rag.llm.LlmProperties;
 import com.yhl.rag.rag.RagProperties;
+import com.yhl.rag.security.CurrentUser;
+import com.yhl.rag.security.MockCurrentUserProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,15 +40,22 @@ public class DocumentService {
     private final RagProperties ragProperties;
     private final LlmProperties llmProperties;
     private final EmbeddingClient embeddingClient;
+    private final MockCurrentUserProvider currentUserProvider;
     private final ConcurrentMap<String, DocumentInfo> documentInfoStore = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> documentTextStore = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<DocumentChunk>> documentChunkStore = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<Double>> chunkEmbeddingStore = new ConcurrentHashMap<>();
 
-    public DocumentService(RagProperties ragProperties, LlmProperties llmProperties, EmbeddingClient embeddingClient) {
+    public DocumentService(
+            RagProperties ragProperties,
+            LlmProperties llmProperties,
+            EmbeddingClient embeddingClient,
+            MockCurrentUserProvider currentUserProvider
+    ) {
         this.ragProperties = ragProperties;
         this.llmProperties = llmProperties;
         this.embeddingClient = embeddingClient;
+        this.currentUserProvider = currentUserProvider;
     }
 
     public DocumentInfo upload(MultipartFile file) {
@@ -53,12 +65,20 @@ public class DocumentService {
         String contentType = normalizeContentType(file.getContentType());
         String content = readText(file);
         String id = UUID.randomUUID().toString();
+        CurrentUser currentUser = currentUserProvider.getCurrentUser();
+        DocumentVisibility visibility = DocumentVisibility.INTERNAL;
         DocumentInfo documentInfo = new DocumentInfo(
                 id,
                 filename,
                 contentType,
                 file.getSize(),
-                Instant.now()
+                Instant.now(),
+                DocumentStatus.ACTIVE,
+                1,
+                currentUser.getUserId(),
+                currentUser.getDepartment(),
+                visibility,
+                currentUser.getPermissionLevel()
         );
 
         List<DocumentChunk> chunks = chunkText(
@@ -66,7 +86,12 @@ public class DocumentService {
                 filename,
                 content,
                 ragProperties.getChunkSize(),
-                ragProperties.getChunkOverlap()
+                ragProperties.getChunkOverlap(),
+                1,
+                currentUser.getUserId(),
+                currentUser.getDepartment(),
+                visibility,
+                currentUser.getPermissionLevel()
         );
         Map<String, List<Double>> embeddings = embedChunks(id, chunks);
 
@@ -75,17 +100,129 @@ public class DocumentService {
         documentChunkStore.put(id, List.copyOf(chunks));
         chunkEmbeddingStore.putAll(embeddings);
 
-        log.info("document_upload id={} filename={} contentType={} size={} textChars={} chunkCount={}",
+        log.info("document_upload id={} filename={} contentType={} size={} textChars={} chunkCount={} ownerId={} department={} visibility={} permissionLevel={}",
                 id,
                 filename,
                 contentType,
                 file.getSize(),
                 content.length(),
-                chunks.size());
+                chunks.size(),
+                currentUser.getUserId(),
+                currentUser.getDepartment(),
+                visibility,
+                currentUser.getPermissionLevel());
+        return documentInfo;
+    }
+
+    public DocumentInfo update(String documentId, MultipartFile file) {
+        if (!StringUtils.hasText(documentId)) {
+            throw new DocumentException(ERROR_DOCUMENT_NOT_FOUND, "documentId 不能为空");
+        }
+        validateFile(file);
+
+        DocumentInfo existingDocument = documentInfoStore.get(documentId);
+        if (existingDocument == null || existingDocument.getStatus() == DocumentStatus.DELETED) {
+            throw new DocumentException(ERROR_DOCUMENT_NOT_FOUND, "文档不存在：" + documentId);
+        }
+
+        int oldVersion = existingDocument.getVersion();
+        int newVersion = oldVersion + 1;
+        List<DocumentChunk> oldChunks = new ArrayList<>(documentChunkStore.getOrDefault(documentId, List.of()));
+
+        String filename = safeFilename(file.getOriginalFilename());
+        String contentType = normalizeContentType(file.getContentType());
+        String content = readText(file);
+        DocumentVisibility visibility = existingDocument.getVisibility();
+
+        List<DocumentChunk> newChunks = chunkText(
+                documentId,
+                filename,
+                content,
+                ragProperties.getChunkSize(),
+                ragProperties.getChunkOverlap(),
+                newVersion,
+                existingDocument.getOwnerId(),
+                existingDocument.getDepartment(),
+                visibility,
+                existingDocument.getPermissionLevel()
+        );
+        Map<String, List<Double>> embeddings = embedChunks(documentId, newChunks);
+
+        int deletedChunkCount = deactivateChunksAndEmbeddings(oldChunks);
+        existingDocument.setFilename(filename);
+        existingDocument.setContentType(contentType);
+        existingDocument.setSize(file.getSize());
+        existingDocument.setStatus(DocumentStatus.ACTIVE);
+        existingDocument.setVersion(newVersion);
+
+        List<DocumentChunk> allChunks = new ArrayList<>(oldChunks);
+        allChunks.addAll(newChunks);
+        documentTextStore.put(documentId, content);
+        documentChunkStore.put(documentId, List.copyOf(allChunks));
+        chunkEmbeddingStore.putAll(embeddings);
+
+        log.info("document_update documentId={} oldVersion={} newVersion={} deletedChunkCount={} newChunkCount={}",
+                documentId,
+                oldVersion,
+                newVersion,
+                deletedChunkCount,
+                newChunks.size());
+        return existingDocument;
+    }
+
+    public DocumentInfo delete(String documentId) {
+        if (!StringUtils.hasText(documentId)) {
+            throw new DocumentException(ERROR_DOCUMENT_NOT_FOUND, "documentId 不能为空");
+        }
+
+        DocumentInfo documentInfo = documentInfoStore.get(documentId);
+        if (documentInfo == null) {
+            throw new DocumentException(ERROR_DOCUMENT_NOT_FOUND, "文档不存在：" + documentId);
+        }
+
+        int oldVersion = documentInfo.getVersion();
+        List<DocumentChunk> chunks = new ArrayList<>(documentChunkStore.getOrDefault(documentId, List.of()));
+        int deletedChunkCount = deactivateChunksAndEmbeddings(chunks);
+        documentInfo.setStatus(DocumentStatus.DELETED);
+        documentChunkStore.put(documentId, List.copyOf(chunks));
+        documentTextStore.remove(documentId);
+
+        log.info("document_delete documentId={} oldVersion={} newVersion={} deletedChunkCount={} newChunkCount={}",
+                documentId,
+                oldVersion,
+                documentInfo.getVersion(),
+                deletedChunkCount,
+                0);
         return documentInfo;
     }
 
     public List<DocumentChunk> chunkText(String documentId, String filename, String text, int chunkSize, int overlap) {
+        return chunkText(
+                documentId,
+                filename,
+                text,
+                chunkSize,
+                overlap,
+                1,
+                null,
+                null,
+                DocumentVisibility.INTERNAL,
+                0
+        );
+    }
+
+    public List<DocumentChunk> chunkText(
+            String documentId,
+            String filename,
+            String text,
+            int chunkSize,
+            int overlap,
+            int version,
+            String ownerId,
+            String department,
+            DocumentVisibility visibility,
+            int permissionLevel
+    ) {
         validateChunkConfig(chunkSize, overlap);
 
         String normalizedText = text == null ? "" : text.trim();
@@ -113,8 +250,15 @@ public class DocumentService {
                     documentId,
                     filename,
                     chunkContent,
+                    sha256Hex(chunkContent),
                     chunkIndex,
-                    createdAt
+                    createdAt,
+                    DocumentStatus.ACTIVE,
+                    version,
+                    ownerId,
+                    department,
+                    visibility,
+                    permissionLevel
             ));
 
             if (end == normalizedText.length()) {
@@ -155,7 +299,8 @@ public class DocumentService {
         }
 
         return chunks.stream()
-                .sorted(Comparator.comparingInt(DocumentChunk::getChunkIndex))
+                .sorted(Comparator.comparingInt(DocumentChunk::getVersion)
+                        .thenComparingInt(DocumentChunk::getChunkIndex))
                 .toList();
     }
 
@@ -173,6 +318,10 @@ public class DocumentService {
         return Map.copyOf(chunkEmbeddingStore);
     }
 
+    public Map<String, DocumentInfo> getDocumentInfoSnapshot() {
+        return Map.copyOf(documentInfoStore);
+    }
+
     private Map<String, List<Double>> embedChunks(String documentId, List<DocumentChunk> chunks) {
         Map<String, List<Double>> embeddings = new HashMap<>();
         for (DocumentChunk chunk : chunks) {
@@ -187,6 +336,18 @@ public class DocumentService {
                     elapsedMillis(startNanos));
         }
         return embeddings;
+    }
+
+    private int deactivateChunksAndEmbeddings(List<DocumentChunk> chunks) {
+        int deletedChunkCount = 0;
+        for (DocumentChunk chunk : chunks) {
+            if (chunk.getStatus() == DocumentStatus.ACTIVE) {
+                deletedChunkCount++;
+            }
+            chunk.setStatus(DocumentStatus.DELETED);
+            chunkEmbeddingStore.remove(chunk.getChunkId());
+        }
+        return deletedChunkCount;
     }
 
     private static void validateFile(MultipartFile file) {
@@ -260,6 +421,16 @@ public class DocumentService {
             return "application/octet-stream";
         }
         return contentType.toLowerCase(Locale.ROOT);
+    }
+
+    private static String sha256Hex(String text) {
+        try {
+            MessageDigest messageDigest = MessageDigest.getInstance("SHA-256");
+            byte[] digest = messageDigest.digest((text == null ? "" : text).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new DocumentException("DOCUMENT_HASH_FAILED", "计算 chunk hash 失败", exception);
+        }
     }
 
     private static long elapsedMillis(long startNanos) {

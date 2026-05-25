@@ -8,6 +8,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.yhl.rag.llm.LlmClient;
+import com.yhl.rag.llm.LlmGenerationResult;
 import com.yhl.rag.llm.LlmMessage;
 import com.yhl.rag.llm.LlmErrorType;
 import com.yhl.rag.llm.LlmException;
@@ -57,21 +58,22 @@ public class RagAskService {
         double scoreThreshold = ragProperties.getSearch().getScoreThreshold();
         boolean debugEnabled = debugRequested && ragProperties.isDebugEnabled();
 
-        List<RagSearchResult> searchResults = ragSearchService.search(question);
+        RagSearchOutcome searchOutcome = ragSearchService.searchWithMetrics(question);
+        List<RagSearchResult> searchResults = searchOutcome.results();
         if (searchResults.isEmpty()) {
-            logAsk(requestId, questionLength, topK, scoreThreshold, searchResults, List.of(), 0, NO_ANSWER, startNanos);
+            logAsk(requestId, questionLength, topK, scoreThreshold, searchResults, 0, NO_ANSWER, searchOutcome, 0, null, startNanos);
             return new RagAskResponse(NO_ANSWER, List.of(), debugChunks(searchResults, Set.of(), debugEnabled));
         }
 
         int maxContextChars = effectiveMaxContextChars(questionLength);
         if (maxContextChars <= 0) {
-            logAsk(requestId, questionLength, topK, scoreThreshold, searchResults, List.of(), 0, NO_ANSWER, startNanos);
+            logAsk(requestId, questionLength, topK, scoreThreshold, searchResults, 0, NO_ANSWER, searchOutcome, 0, null, startNanos);
             return new RagAskResponse(NO_ANSWER, List.of(), debugChunks(searchResults, Set.of(), debugEnabled));
         }
 
         ContextBuildResult contextBuildResult = buildContext(searchResults, maxContextChars);
         if (contextBuildResult.sources().isEmpty()) {
-            logAsk(requestId, questionLength, topK, scoreThreshold, searchResults, List.of(), 0, NO_ANSWER, startNanos);
+            logAsk(requestId, questionLength, topK, scoreThreshold, searchResults, 0, NO_ANSWER, searchOutcome, 0, null, startNanos);
             return new RagAskResponse(NO_ANSWER, List.of(), debugChunks(searchResults, Set.of(), debugEnabled));
         }
 
@@ -83,7 +85,10 @@ public class RagAskService {
                 %s
                 """.formatted(question, contextBuildResult.context());
 
-        String answer = llmClient.generate(SYSTEM_PROMPT, List.of(new LlmMessage("user", prompt)));
+        long chatStartNanos = System.nanoTime();
+        LlmGenerationResult generationResult = llmClient.generateWithUsage(SYSTEM_PROMPT, List.of(new LlmMessage("user", prompt)));
+        long chatDurationMs = Duration.ofNanos(System.nanoTime() - chatStartNanos).toMillis();
+        String answer = generationResult.getAnswer();
         Set<String> includedChunkIds = contextBuildResult.sources().stream()
                 .map(RagSource::getChunkId)
                 .collect(Collectors.toSet());
@@ -93,9 +98,11 @@ public class RagAskService {
                 topK,
                 scoreThreshold,
                 searchResults,
-                contextBuildResult.sources(),
                 contextBuildResult.context().length(),
                 answer,
+                searchOutcome,
+                chatDurationMs,
+                generationResult,
                 startNanos
         );
         return new RagAskResponse(answer, contextBuildResult.sources(), debugChunks(searchResults, includedChunkIds, debugEnabled));
@@ -177,9 +184,11 @@ public class RagAskService {
             int topK,
             double scoreThreshold,
             List<RagSearchResult> searchResults,
-            List<RagSource> sources,
             int contextChars,
             String answer,
+            RagSearchOutcome searchOutcome,
+            long chatDurationMs,
+            LlmGenerationResult generationResult,
             long startNanos
     ) {
         List<String> matchedChunkIds = searchResults.stream()
@@ -189,7 +198,7 @@ public class RagAskService {
                 .map(RagSearchResult::getScore)
                 .toList();
 
-        log.info("rag_ask requestId={} questionLength={} topK={} scoreThreshold={} matchedChunkCount={} matchedChunkIds={} scores={} contextChars={} model={} durationMs={} answerLength={}",
+        log.info("rag_ask requestId={} questionLength={} topK={} scoreThreshold={} matchedCount={} matchedChunkIds={} scores={} contextChars={} answerLength={} embeddingDurationMs={} searchDurationMs={} chatDurationMs={} totalDurationMs={} model={} promptTokens={} completionTokens={} totalTokens={}",
                 requestId,
                 questionLength,
                 topK,
@@ -198,9 +207,15 @@ public class RagAskService {
                 matchedChunkIds,
                 scores,
                 contextChars,
-                llmProperties.getModel(),
+                answer == null ? 0 : answer.length(),
+                searchOutcome == null ? 0 : searchOutcome.embeddingDurationMs(),
+                searchOutcome == null ? 0 : searchOutcome.searchDurationMs(),
+                chatDurationMs,
                 Duration.ofNanos(System.nanoTime() - startNanos).toMillis(),
-                answer == null ? 0 : answer.length());
+                llmProperties.getModel(),
+                generationResult == null ? null : generationResult.getPromptTokens(),
+                generationResult == null ? null : generationResult.getCompletionTokens(),
+                generationResult == null ? null : generationResult.getTotalTokens());
     }
 
     private record ContextBuildResult(String context, List<RagSource> sources) {

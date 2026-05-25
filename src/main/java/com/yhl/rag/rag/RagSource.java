@@ -1,5 +1,8 @@
 package com.yhl.rag.rag;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class RagSource {
 
     private String id;
