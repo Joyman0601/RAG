@@ -24,7 +24,7 @@ public class ToolController {
         ToolExecutionContext context = new ToolExecutionContext(
                 resolveRequestId(servletRequest),
                 "user_001",
-                "mock-department",
+                "default-department",
                 1
         );
 

@@ -21,6 +21,7 @@ import com.yhl.rag.llm.LlmProperties;
 import com.yhl.rag.rag.RagProperties;
 import com.yhl.rag.security.CurrentUser;
 import com.yhl.rag.security.MockCurrentUserProvider;
+import com.yhl.rag.vector.VectorStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -41,21 +42,23 @@ public class DocumentService {
     private final LlmProperties llmProperties;
     private final EmbeddingClient embeddingClient;
     private final MockCurrentUserProvider currentUserProvider;
+    private final VectorStore vectorStore;
     private final ConcurrentMap<String, DocumentInfo> documentInfoStore = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> documentTextStore = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<DocumentChunk>> documentChunkStore = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, List<Double>> chunkEmbeddingStore = new ConcurrentHashMap<>();
 
     public DocumentService(
             RagProperties ragProperties,
             LlmProperties llmProperties,
             EmbeddingClient embeddingClient,
-            MockCurrentUserProvider currentUserProvider
+            MockCurrentUserProvider currentUserProvider,
+            VectorStore vectorStore
     ) {
         this.ragProperties = ragProperties;
         this.llmProperties = llmProperties;
         this.embeddingClient = embeddingClient;
         this.currentUserProvider = currentUserProvider;
+        this.vectorStore = vectorStore;
     }
 
     public DocumentInfo upload(MultipartFile file) {
@@ -93,12 +96,12 @@ public class DocumentService {
                 visibility,
                 currentUser.getPermissionLevel()
         );
-        Map<String, List<Double>> embeddings = embedChunks(id, chunks);
+        Map<DocumentChunk, List<Double>> embeddings = embedChunks(id, chunks);
 
         documentInfoStore.put(id, documentInfo);
         documentTextStore.put(id, content);
         documentChunkStore.put(id, List.copyOf(chunks));
-        chunkEmbeddingStore.putAll(embeddings);
+        vectorStore.saveAll(embeddings);
 
         log.info("document_upload id={} filename={} contentType={} size={} textChars={} chunkCount={} ownerId={} department={} visibility={} permissionLevel={}",
                 id,
@@ -146,7 +149,7 @@ public class DocumentService {
                 visibility,
                 existingDocument.getPermissionLevel()
         );
-        Map<String, List<Double>> embeddings = embedChunks(documentId, newChunks);
+        Map<DocumentChunk, List<Double>> embeddings = embedChunks(documentId, newChunks);
 
         int deletedChunkCount = deactivateChunksAndEmbeddings(oldChunks);
         existingDocument.setFilename(filename);
@@ -159,7 +162,7 @@ public class DocumentService {
         allChunks.addAll(newChunks);
         documentTextStore.put(documentId, content);
         documentChunkStore.put(documentId, List.copyOf(allChunks));
-        chunkEmbeddingStore.putAll(embeddings);
+        vectorStore.saveAll(embeddings);
 
         log.info("document_update documentId={} oldVersion={} newVersion={} deletedChunkCount={} newChunkCount={}",
                 documentId,
@@ -183,6 +186,7 @@ public class DocumentService {
         int oldVersion = documentInfo.getVersion();
         List<DocumentChunk> chunks = new ArrayList<>(documentChunkStore.getOrDefault(documentId, List.of()));
         int deletedChunkCount = deactivateChunksAndEmbeddings(chunks);
+        vectorStore.deleteByDocumentId(documentId);
         documentInfo.setStatus(DocumentStatus.DELETED);
         documentChunkStore.put(documentId, List.copyOf(chunks));
         documentTextStore.remove(documentId);
@@ -305,7 +309,7 @@ public class DocumentService {
     }
 
     public List<Double> getChunkEmbedding(String chunkId) {
-        return chunkEmbeddingStore.get(chunkId);
+        return vectorStore.getEmbedding(chunkId);
     }
 
     public List<DocumentChunk> listAllChunks() {
@@ -315,19 +319,19 @@ public class DocumentService {
     }
 
     public Map<String, List<Double>> getChunkEmbeddingsSnapshot() {
-        return Map.copyOf(chunkEmbeddingStore);
+        return vectorStore.getEmbeddingSnapshot();
     }
 
     public Map<String, DocumentInfo> getDocumentInfoSnapshot() {
         return Map.copyOf(documentInfoStore);
     }
 
-    private Map<String, List<Double>> embedChunks(String documentId, List<DocumentChunk> chunks) {
-        Map<String, List<Double>> embeddings = new HashMap<>();
+    private Map<DocumentChunk, List<Double>> embedChunks(String documentId, List<DocumentChunk> chunks) {
+        Map<DocumentChunk, List<Double>> embeddings = new HashMap<>();
         for (DocumentChunk chunk : chunks) {
             long startNanos = System.nanoTime();
             List<Double> vector = embeddingClient.embed(chunk.getContent());
-            embeddings.put(chunk.getChunkId(), List.copyOf(vector));
+            embeddings.put(chunk, List.copyOf(vector));
             log.info("document_chunk_embedding documentId={} chunkId={} model={} vectorDimension={} durationMs={}",
                     documentId,
                     chunk.getChunkId(),
@@ -340,13 +344,15 @@ public class DocumentService {
 
     private int deactivateChunksAndEmbeddings(List<DocumentChunk> chunks) {
         int deletedChunkCount = 0;
+        List<String> deletedChunkIds = new ArrayList<>();
         for (DocumentChunk chunk : chunks) {
             if (chunk.getStatus() == DocumentStatus.ACTIVE) {
                 deletedChunkCount++;
             }
             chunk.setStatus(DocumentStatus.DELETED);
-            chunkEmbeddingStore.remove(chunk.getChunkId());
+            deletedChunkIds.add(chunk.getChunkId());
         }
+        vectorStore.deleteByChunkIds(deletedChunkIds);
         return deletedChunkCount;
     }
 

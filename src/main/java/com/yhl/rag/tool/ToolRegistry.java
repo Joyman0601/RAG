@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.yhl.rag.agent.AgentErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -36,7 +37,7 @@ public class ToolRegistry {
     public ToolExecutor<?> getTool(String toolName) {
         ToolExecutor<?> executor = executors.get(toolName);
         if (executor == null) {
-            throw new ToolException("TOOL_NOT_FOUND", "tool not found: " + toolName, toolName, HttpStatus.NOT_FOUND);
+            throw new ToolException(AgentErrorCode.UNKNOWN_TOOL.name(), "tool not found", toolName, HttpStatus.NOT_FOUND);
         }
         return executor;
     }

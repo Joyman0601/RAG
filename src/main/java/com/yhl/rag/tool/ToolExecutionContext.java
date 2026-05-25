@@ -1,5 +1,7 @@
 package com.yhl.rag.tool;
 
+import java.util.Set;
+
 import com.yhl.rag.security.CurrentUser;
 
 public class ToolExecutionContext {
@@ -12,14 +14,33 @@ public class ToolExecutionContext {
 
     private int permissionLevel;
 
+    private Set<String> roles = Set.of();
+
+    private Set<String> permissions = Set.of();
+
+    private boolean confirmedHighRiskExecution;
+
     public ToolExecutionContext() {
     }
 
     public ToolExecutionContext(String requestId, String userId, String department, int permissionLevel) {
+        this(requestId, userId, department, permissionLevel, Set.of("customer"), Set.of("order:query", "order:cancel", "knowledge:search"));
+    }
+
+    public ToolExecutionContext(
+            String requestId,
+            String userId,
+            String department,
+            int permissionLevel,
+            Set<String> roles,
+            Set<String> permissions
+    ) {
         this.requestId = requestId;
         this.userId = userId;
         this.department = department;
         this.permissionLevel = permissionLevel;
+        this.roles = roles == null ? Set.of() : Set.copyOf(roles);
+        this.permissions = permissions == null ? Set.of() : Set.copyOf(permissions);
     }
 
     public static ToolExecutionContext from(String requestId, CurrentUser currentUser) {
@@ -61,5 +82,29 @@ public class ToolExecutionContext {
 
     public void setPermissionLevel(int permissionLevel) {
         this.permissionLevel = permissionLevel;
+    }
+
+    public Set<String> getRoles() {
+        return roles;
+    }
+
+    public void setRoles(Set<String> roles) {
+        this.roles = roles == null ? Set.of() : Set.copyOf(roles);
+    }
+
+    public Set<String> getPermissions() {
+        return permissions;
+    }
+
+    public void setPermissions(Set<String> permissions) {
+        this.permissions = permissions == null ? Set.of() : Set.copyOf(permissions);
+    }
+
+    public boolean isConfirmedHighRiskExecution() {
+        return confirmedHighRiskExecution;
+    }
+
+    public void setConfirmedHighRiskExecution(boolean confirmedHighRiskExecution) {
+        this.confirmedHighRiskExecution = confirmedHighRiskExecution;
     }
 }

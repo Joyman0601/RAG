@@ -7,10 +7,13 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yhl.rag.agent.AgentErrorCode;
+import com.yhl.rag.agent.AgentSafetyPolicy;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -25,10 +28,18 @@ public class ToolExecutionService {
 
     private final Validator validator;
 
+    private final AgentSafetyPolicy safetyPolicy;
+
     public ToolExecutionService(ToolRegistry toolRegistry, ObjectMapper objectMapper, Validator validator) {
+        this(toolRegistry, objectMapper, validator, new AgentSafetyPolicy());
+    }
+
+    @Autowired
+    public ToolExecutionService(ToolRegistry toolRegistry, ObjectMapper objectMapper, Validator validator, AgentSafetyPolicy safetyPolicy) {
         this.toolRegistry = toolRegistry;
         this.objectMapper = objectMapper;
         this.validator = validator;
+        this.safetyPolicy = safetyPolicy;
     }
 
     public ToolResult execute(String toolName, JsonNode arguments, ToolExecutionContext context) {
@@ -38,59 +49,73 @@ public class ToolExecutionService {
         try {
             normalizedToolName = normalizeToolName(toolName);
             ToolExecutor<?> executor = toolRegistry.getTool(normalizedToolName);
+            checkHighRiskConfirmation(executor.getDefinition(), context);
+            checkPermission(executor.getDefinition(), context);
             Object request = readAndValidateArguments(executor, arguments);
             Object result = executeTyped(executor, request, context);
             long elapsedMillis = elapsedMillis(startedAt);
-            log.info("Tool call finished: requestId={}, toolName={}, elapsedMs={}, success=true",
+            log.info("tool_call requestId={} toolName={} success=true elapsedMs={}",
                     requestId(context),
                     normalizedToolName,
                     elapsedMillis);
             return ToolResult.success(normalizedToolName, result, elapsedMillis);
         } catch (ToolException exception) {
             long elapsedMillis = elapsedMillis(startedAt);
-            log.warn("Tool call failed: requestId={}, toolName={}, elapsedMs={}, success=false, errorType={}, message={}",
+            String errorCode = normalizeErrorCode(exception.getErrorType());
+            log.warn("tool_call requestId={} toolName={} success=false elapsedMs={} errorCode={} message={}",
                     requestId(context),
                     resolveToolName(normalizedToolName, toolName, exception),
                     elapsedMillis,
-                    exception.getErrorType(),
+                    errorCode,
                     exception.getMessage(),
                     exception);
             return ToolResult.failure(
                     resolveToolName(normalizedToolName, toolName, exception),
-                    exception.getErrorType(),
+                    errorCode,
                     sanitizeErrorMessage(exception),
                     elapsedMillis
             );
         } catch (RuntimeException exception) {
             long elapsedMillis = elapsedMillis(startedAt);
-            log.error("Tool call failed unexpectedly: requestId={}, toolName={}, elapsedMs={}, success=false",
+            log.error("tool_call requestId={} toolName={} success=false elapsedMs={} errorCode={}",
                     requestId(context),
                     normalizedToolName == null ? toolName : normalizedToolName,
                     elapsedMillis,
+                    AgentErrorCode.TOOL_EXECUTION_FAILED,
                     exception);
             return ToolResult.failure(
                     normalizedToolName == null ? toolName : normalizedToolName,
-                    "TOOL_EXECUTION_ERROR",
+                    AgentErrorCode.TOOL_EXECUTION_FAILED.name(),
                     "tool execution failed",
                     elapsedMillis
             );
         }
     }
 
+    public ValidatedToolCall validate(String toolName, JsonNode arguments, ToolExecutionContext context) {
+        String normalizedToolName = normalizeToolName(toolName);
+        ToolExecutor<?> executor = toolRegistry.getTool(normalizedToolName);
+        checkPermission(executor.getDefinition(), context);
+        readAndValidateArguments(executor, arguments);
+        JsonNode snapshot = arguments == null ? null : arguments.deepCopy();
+        return new ValidatedToolCall(normalizedToolName, executor.getDefinition(), snapshot);
+    }
+
     private String normalizeToolName(String toolName) {
         if (!StringUtils.hasText(toolName)) {
-            throw new ToolException("TOOL_NAME_REQUIRED", "toolName is required");
+            throw new ToolException(AgentErrorCode.VALIDATION_ERROR.name(), "toolName is required");
         }
         return toolName.trim();
     }
 
     private Object readAndValidateArguments(ToolExecutor<?> executor, JsonNode arguments) {
         if (arguments == null || arguments.isNull() || !arguments.isObject()) {
-            throw new ToolException("TOOL_ARGUMENT_INVALID", "arguments must be a JSON object", executor.getName());
+            throw new ToolException(AgentErrorCode.VALIDATION_ERROR.name(), "arguments must be a JSON object", executor.getName());
         }
 
-        if ("query_order".equals(executor.getName()) && arguments.has("userId")) {
-            throw new ToolException("TOOL_ARGUMENT_FORBIDDEN", "userId is not allowed in arguments", executor.getName());
+        String forbiddenArgument = findForbiddenArgument(arguments);
+        if (forbiddenArgument != null) {
+            throw new ToolException(AgentErrorCode.PERMISSION_DENIED.name(), forbiddenArgument + " is not allowed in tool arguments", executor.getName());
         }
 
         Object request;
@@ -100,11 +125,36 @@ public class ToolExecutionService {
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .readValue(arguments);
         } catch (IOException exception) {
-            throw new ToolException("TOOL_ARGUMENT_INVALID", "arguments cannot be deserialized to " + executor.getRequestClass().getSimpleName(), executor.getName());
+            throw new ToolException(AgentErrorCode.VALIDATION_ERROR.name(), "arguments format is invalid", executor.getName());
         }
 
         validateRequest(executor.getName(), request);
         return request;
+    }
+
+    private void checkPermission(ToolDefinition definition, ToolExecutionContext context) {
+        String permissionCode = definition.getPermissionCode();
+        if (!StringUtils.hasText(permissionCode)) {
+            return;
+        }
+        if (context == null || context.getPermissions() == null || !context.getPermissions().contains(permissionCode)) {
+            throw new ToolException(AgentErrorCode.PERMISSION_DENIED.name(), "current user is not allowed to call this tool", definition.getName());
+        }
+    }
+
+    private void checkHighRiskConfirmation(ToolDefinition definition, ToolExecutionContext context) {
+        if (definition.getRiskLevel() != RiskLevel.HIGH) {
+            return;
+        }
+        boolean confirmationRequired = safetyPolicy.isRequireConfirmationForHighRisk()
+                || !safetyPolicy.isAllowHighRiskAutoExecute();
+        if (confirmationRequired && (context == null || !context.isConfirmedHighRiskExecution())) {
+            throw new ToolException(
+                    AgentErrorCode.CONFIRMATION_REQUIRED.name(),
+                    "high risk tool requires confirmation",
+                    definition.getName()
+            );
+        }
     }
 
     private void validateRequest(String toolName, Object request) {
@@ -113,7 +163,7 @@ public class ToolExecutionService {
             String message = violations.stream()
                     .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
                     .collect(Collectors.joining("; "));
-            throw new ToolException("TOOL_ARGUMENT_INVALID", message, toolName);
+            throw new ToolException(AgentErrorCode.VALIDATION_ERROR.name(), message, toolName);
         }
     }
 
@@ -146,5 +196,27 @@ public class ToolExecutionService {
             return "tool execution failed";
         }
         return message;
+    }
+
+    private String normalizeErrorCode(String errorType) {
+        if (!StringUtils.hasText(errorType)) {
+            return AgentErrorCode.TOOL_EXECUTION_FAILED.name();
+        }
+        if ("TOOL_NOT_FOUND".equals(errorType)) {
+            return AgentErrorCode.UNKNOWN_TOOL.name();
+        }
+        if ("ORDER_NOT_FOUND".equals(errorType)) {
+            return AgentErrorCode.BUSINESS_REJECTED.name();
+        }
+        return errorType;
+    }
+
+    private String findForbiddenArgument(JsonNode arguments) {
+        for (String forbiddenKey : Set.of("userId", "tenantId", "topK", "scoreThreshold")) {
+            if (arguments.has(forbiddenKey)) {
+                return forbiddenKey;
+            }
+        }
+        return null;
     }
 }

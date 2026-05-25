@@ -2,7 +2,7 @@ package com.yhl.rag.agent;
 
 import jakarta.validation.constraints.NotBlank;
 
-public class AgentChatRequest {
+public class RefundWorkflowRequest {
 
     private String conversationId;
 

@@ -1,6 +1,7 @@
 package com.yhl.rag.tool;
 
-import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yhl.rag.agent.AgentErrorCode;
@@ -8,19 +9,19 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 @Component
-public class QueryOrderToolExecutor implements ToolExecutor<QueryOrderToolRequest> {
+public class CancelOrderToolExecutor implements ToolExecutor<CancelOrderToolRequest> {
 
-    private static final String TOOL_NAME = "query_order";
+    private static final String TOOL_NAME = "cancel_order";
 
     private final ToolDefinition definition;
 
-    public QueryOrderToolExecutor(ObjectMapper objectMapper) {
+    public CancelOrderToolExecutor(ObjectMapper objectMapper) {
         this.definition = new ToolDefinition(
                 TOOL_NAME,
-                "Query mock order data by order id. User identity comes from backend context.",
+                "Cancel a mock order by order id. This is a high risk operation and requires user confirmation.",
                 buildParameterSchema(objectMapper),
-                "order:query",
-                RiskLevel.LOW
+                "order:cancel",
+                RiskLevel.HIGH
         );
     }
 
@@ -35,49 +36,23 @@ public class QueryOrderToolExecutor implements ToolExecutor<QueryOrderToolReques
     }
 
     @Override
-    public Class<QueryOrderToolRequest> getRequestClass() {
-        return QueryOrderToolRequest.class;
+    public Class<CancelOrderToolRequest> getRequestClass() {
+        return CancelOrderToolRequest.class;
     }
 
     @Override
-    public Object execute(QueryOrderToolRequest request, ToolExecutionContext context) {
+    public Object execute(CancelOrderToolRequest request, ToolExecutionContext context) {
         if (context == null || context.getUserId() == null || context.getUserId().isBlank()) {
             throw new ToolException("PERMISSION_DENIED", "current user is required", TOOL_NAME, HttpStatus.BAD_REQUEST);
         }
-
         if ("ORD_NOT_FOUND".equals(request.getOrderId())) {
             throw new ToolException(AgentErrorCode.BUSINESS_REJECTED.name(), "order not found", TOOL_NAME, HttpStatus.BAD_REQUEST);
         }
-
-        if (!request.getOrderId().startsWith(context.getUserId() + "_")
-                && !isPublicMockOrder(request.getOrderId())) {
-            throw new ToolException("PERMISSION_DENIED", "current user is not allowed to access this order", TOOL_NAME, HttpStatus.BAD_REQUEST);
-        }
-
-        String logisticsStatus = mockLogisticsStatus(request.getOrderId());
-        return new QueryOrderToolResult(
+        return new CancelOrderToolResult(
                 request.getOrderId(),
-                "PAID",
-                new BigDecimal("199.90"),
-                "2026-05-20T10:30:00+08:00",
-                logisticsStatus
+                "CANCELLED",
+                OffsetDateTime.now(ZoneOffset.ofHours(8)).toString()
         );
-    }
-
-    private boolean isPublicMockOrder(String orderId) {
-        return "ORD001".equals(orderId)
-                || "ORD002".equals(orderId)
-                || "ORD202605220001".equals(orderId)
-                || "123456".equals(orderId);
-    }
-
-    private String mockLogisticsStatus(String orderId) {
-        if ("ORD002".equals(orderId)
-                || "123456".equals(orderId)
-                || orderId.endsWith("_UNSHIPPED")) {
-            return "NOT_SHIPPED";
-        }
-        return "SHIPPED";
     }
 
     private com.fasterxml.jackson.databind.JsonNode buildParameterSchema(ObjectMapper objectMapper) {

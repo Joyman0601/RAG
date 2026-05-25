@@ -96,29 +96,83 @@ RAG 核心面试表达：
 
 > 我做了一个基于 Spring Boot 的企业知识库 RAG 问答系统。它支持文档上传、自动切分、embedding 向量化、语义检索、基于上下文回答，并返回引用来源。相比直接让模型回答，这个系统能让答案基于企业内部资料，同时支持无答案兜底、文档更新、调试评估、成本统计和基础权限过滤。
 
-## 已进入阶段三：Tool Calling
+## 已完成阶段三：Tool Calling / Agent
 
-刚开始第三周第一课：Tool Calling 是什么。
+已学习的课程：
 
-已讲过的核心认知：
+- Tool Calling 是什么：模型不执行函数，只生成候选 tool call，后端执行。
+- 工具 schema 怎么设计，为什么参数必须强校验。
+- ToolRegistry / ToolExecutor / ToolExecutionService 的工具注册和统一执行链路。
+- 模型如何选择工具，后端如何裁决。
+- 工具执行结果如何返回给模型，为什么不能直接暴露 Entity。
+- 权限控制与高风险工具二次确认。
+- 单轮 Tool Calling 到受控 Agent Loop。
+- Agent 上下文管理、短期记忆和长期记忆。
+- Agent 可观测性、AgentStep、requestId、审计日志和错误码。
+- 把 RAG 封装成 Agent 工具 search_knowledge_base。
+- Agent 工作流与状态机，核心业务不能完全交给自由 Agent。
+- Tool Calling / Agent 测试策略。
+- Agent 上线前安全清单。
+- Agent 项目的面试讲法与项目包装。
+- Agent 阶段总结与下一阶段路线。
 
-- Tool Calling / Function Calling 不是模型真的执行函数。
-- 模型负责根据用户输入生成结构化工具调用请求，例如 toolName 和 arguments。
-- 后端负责真正执行工具。
-- 后端必须负责参数校验、权限控制、超时、重试、审计日志和高风险操作确认。
+阶段三核心认知：
 
-当前阶段建议实现的第一个工具：
+- Tool Calling 不是模型执行函数，而是模型生成候选工具调用，后端裁决并执行。
+- Schema 是后端提供给模型的工具说明，arguments 是模型根据用户自然语言抽取出来的参数。
+- 模型传来的 arguments 仍然是不可信输入，要转 DTO 并做 Bean Validation。
+- userId、tenantId、role 这类权限字段不能让模型传，必须来自后端认证上下文。
+- RAG 的 sources 必须由后端根据实际进入 context 的 chunk 生成，不能由模型编造。
+- 高风险工具不能自动执行，必须进入后端确认流程。
+- Agent Loop 必须限制最大步数、超时、工具白名单和重复调用，不能让模型无限循环。
+- Agent 的记忆本质上是后端管理上下文，不是模型真的永久记住。
+- Agent 的智能靠模型，Agent 的可靠性靠后端治理。
 
-- query_order
-- 参数：orderId，字符串，必填
-- 先 mock 订单结果
-- 暂时不要让模型自动决定工具
-- 先实现后端指定 toolName -> 执行工具 -> 返回结构化结果
-
-建议下一课继续：
+Agent 完整主链路：
 
 ```text
-第三周第 2 课：工具 schema 怎么设计，为什么参数必须强校验。
+1. 用户输入自然语言
+2. 后端根据当前用户权限，从 ToolRegistry 取可用工具 schema
+3. 后端构造 messages，包括 system prompt、用户消息、必要 ConversationState
+4. 调用 LLM
+5. 模型返回普通文本或 tool call
+6. 如果是普通文本，后端直接返回
+7. 如果是 tool call，后端检查工具是否注册、是否授权、是否风险可执行
+8. 后端将 arguments 转成强类型 DTO，并用 Bean Validation 校验
+9. 后端做数据权限和业务规则校验
+10. 低风险工具执行，高风险工具进入确认流程
+11. 工具结果封装成 ToolResult，字段白名单和脱敏
+12. 工具结果追加到上下文，再次调用 LLM 生成最终回答
+13. 全链路记录 requestId、AgentStep、耗时、错误码和审计日志
+```
+
+第三阶段项目面试表达：
+
+> 我做的是一个 Spring Boot 企业知识库 RAG + Agent 助手系统。底层封装了 OpenAI-compatible Chat API，支持普通问答、SSE 流式输出和结构化 JSON 输出；RAG 部分实现了文档上传、chunk 切分、embedding、向量检索、score threshold、sources 返回和文档更新；Agent 部分我设计了 ToolExecutor、ToolRegistry 和 ToolExecutionService，把订单查询、知识库检索等后端能力封装成工具，让模型可以根据用户自然语言生成 tool call。后端不会直接信任模型参数，而是做 DTO 校验、权限校验、业务校验和高风险确认，并通过 requestId、AgentStep 和审计日志保证可排查、可追踪。
+
+## 下一阶段：第四周，生产化与工程增强
+
+第四周重点不是继续堆 Agent 概念，而是把当前 demo 形态的 RAG + Agent 项目推向更像真实企业项目的工程形态。
+
+建议课程路线：
+
+```text
+第四周第 1 课：从内存向量库迁移到真实向量库，Milvus / pgvector / Elasticsearch 怎么选
+第四周第 2 课：文档解析和异步入库任务，为什么不能在上传接口里同步 embedding 大文件
+第四周第 3 课：embedding 任务状态、失败重试和幂等设计
+第四周第 4 课：RAG 评估集怎么做，如何判断检索质量和回答质量
+第四周第 5 课：多租户和企业权限模型，文档级 / chunk 级权限怎么落地
+第四周第 6 课：缓存策略，哪些 LLM/RAG/Tool 结果可以缓存，哪些不能缓存
+第四周第 7 课：成本治理，token 预算、限流、配额、模型分级
+第四周第 8 课：生产日志、指标和告警，怎么监控 LLM 应用
+第四周第 9 课：灰度发布和 shadow mode，如何安全上线 Agent 工具
+第四周第 10 课：最终项目复盘和面试模拟
+```
+
+下一课请从这里开始：
+
+```text
+第四周第 1 课：从内存向量库迁移到真实向量库，Milvus / pgvector / Elasticsearch 怎么选
 ```
 
 ## 新窗口启动提示词
@@ -132,8 +186,14 @@ RAG 核心面试表达：
 
 请先阅读项目根目录的 next-window-continuation.md，按里面记录的进度接着讲。
 
-我已经完成 LLM API 基础和 RAG 主链路，现在刚进入 Tool Calling 阶段。上一课讲完了 Tool Calling 是什么，以及模型不是真的执行函数，后端才负责工具执行、参数校验、权限控制和审计。
+我已经完成：
+1. LLM API 基础，包括普通调用、SSE 流式输出、结构化 JSON 输出、异常处理、token 和成本控制。
+2. RAG 主链路，包括文档上传、chunk、embedding、向量检索、sources、文档更新、旧 embedding 移除和基础权限过滤。
+3. Tool Calling / Agent 阶段，包括工具 schema、参数强校验、ToolRegistry、ToolExecutionService、模型选择工具、后端裁决、工具结果封装、高风险确认、Agent Loop、ConversationState、RAG 工具化、状态机工作流、测试策略、可观测性、安全清单和面试讲法。
+
+现在进入下一阶段：
+第四周：生产化与工程增强。
 
 请继续下一课：
-第三周第 2 课：工具 schema 怎么设计，为什么参数必须强校验。
+第四周第 1 课：从内存向量库迁移到真实向量库，Milvus / pgvector / Elasticsearch 怎么选。
 ```

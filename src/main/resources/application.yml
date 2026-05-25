@@ -29,3 +29,15 @@ llm:
   embedding-timeout: ${LLM_EMBEDDING_TIMEOUT:30}
   proxy-host: ${LLM_PROXY_HOST:}
   proxy-port: ${LLM_PROXY_PORT:0}
+
+agent:
+  safety:
+    max-input-length: ${AGENT_SAFETY_MAX_INPUT_LENGTH:2000}
+    max-output-tokens: ${AGENT_SAFETY_MAX_OUTPUT_TOKENS:800}
+    max-agent-steps: ${AGENT_SAFETY_MAX_AGENT_STEPS:3}
+    max-agent-duration-ms: ${AGENT_SAFETY_MAX_AGENT_DURATION_MS:10000}
+    allow-high-risk-auto-execute: ${AGENT_SAFETY_ALLOW_HIGH_RISK_AUTO_EXECUTE:false}
+    require-tool-permission-code: ${AGENT_SAFETY_REQUIRE_TOOL_PERMISSION_CODE:true}
+    require-tool-risk-level: ${AGENT_SAFETY_REQUIRE_TOOL_RISK_LEVEL:true}
+    require-confirmation-for-high-risk: ${AGENT_SAFETY_REQUIRE_CONFIRMATION_FOR_HIGH_RISK:true}
+    log-full-prompt: ${AGENT_SAFETY_LOG_FULL_PROMPT:false}
