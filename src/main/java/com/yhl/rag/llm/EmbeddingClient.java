@@ -16,6 +16,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -29,15 +30,35 @@ public class EmbeddingClient {
     private final HttpClient httpClient;
     private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
+    private final EmbeddingCache embeddingCache;
 
-    public EmbeddingClient(LlmProperties llmProperties, ObjectMapper objectMapper) {
+    @Autowired
+    public EmbeddingClient(LlmProperties llmProperties, ObjectMapper objectMapper, EmbeddingCache embeddingCache) {
         this.llmProperties = llmProperties;
         this.objectMapper = objectMapper;
+        this.embeddingCache = embeddingCache;
         this.httpClient = buildHttpClient(llmProperties);
+    }
+
+    public EmbeddingClient(LlmProperties llmProperties, ObjectMapper objectMapper) {
+        this(llmProperties, objectMapper, new EmbeddingCache());
     }
 
     public List<Double> embed(String text) {
         long startNanos = System.nanoTime();
+        String embeddingModel = llmProperties.getEmbeddingModel();
+        String textHash = embeddingCache.textHash(text);
+        var cachedEmbedding = embeddingCache.get(embeddingModel, text);
+        if (cachedEmbedding.isPresent()) {
+            List<Double> vector = cachedEmbedding.get().getVector();
+            log.info("embedding_cache_hit model={} textHash={} tokenCount={} vectorDimension={}",
+                    embeddingModel,
+                    textHash,
+                    cachedEmbedding.get().getTokenCount(),
+                    vector.size());
+            return vector;
+        }
+        log.info("embedding_cache_miss model={} textHash={}", embeddingModel, textHash);
 
         if (!StringUtils.hasText(llmProperties.getEmbeddingBaseUrl())) {
             logFailure(startNanos, LlmErrorType.EMBEDDING_CONFIG_MISSING);
@@ -55,7 +76,7 @@ public class EmbeddingClient {
             );
         }
 
-        EmbeddingRequest requestBody = new EmbeddingRequest(llmProperties.getEmbeddingModel(), text);
+        EmbeddingRequest requestBody = new EmbeddingRequest(embeddingModel, text);
 
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -81,6 +102,7 @@ public class EmbeddingClient {
 
             EmbeddingResponse embeddingResponse = objectMapper.readValue(response.body(), EmbeddingResponse.class);
             List<Double> vector = extractVector(embeddingResponse);
+            embeddingCache.put(embeddingModel, text, vector);
             logSuccess(startNanos, vector.size());
             return vector;
         } catch (LlmException exception) {

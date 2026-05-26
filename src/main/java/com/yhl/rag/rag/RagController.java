@@ -68,4 +68,9 @@ public class RagController {
     public RagEvalResponse eval(@RequestParam(name = "onlySearch", defaultValue = "false") boolean onlySearch) {
         return ragEvalService.evaluate(onlySearch);
     }
+
+    @PostMapping("/eval/run")
+    public RagEvalResponse runEval(@RequestBody(required = false) RagEvalRunRequest request) {
+        return ragEvalService.evaluate(request);
+    }
 }

@@ -9,12 +9,20 @@ import java.util.UUID;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yhl.rag.cost.CostGovernanceService;
+import com.yhl.rag.cost.CostProperties;
+import com.yhl.rag.cost.ModelTier;
+import com.yhl.rag.cost.QuotaService;
+import com.yhl.rag.cost.RateLimitService;
+import com.yhl.rag.cost.TokenEstimator;
+import com.yhl.rag.cost.UsageRecordService;
 import com.yhl.rag.llm.LlmClient;
 import com.yhl.rag.llm.LlmErrorType;
 import com.yhl.rag.llm.LlmException;
 import com.yhl.rag.llm.LlmGenerationResult;
 import com.yhl.rag.llm.LlmMessage;
 import com.yhl.rag.llm.LlmProperties;
+import com.yhl.rag.observability.RequestContext;
 import com.yhl.rag.tool.ToolDefinition;
 import com.yhl.rag.tool.RiskLevel;
 import com.yhl.rag.tool.ToolExecutionContext;
@@ -26,6 +34,7 @@ import com.yhl.rag.tool.SearchKnowledgeToolResult;
 import com.yhl.rag.tool.ValidatedToolCall;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -74,6 +83,10 @@ public class AgentChatService {
 
     private final AllowedToolService allowedToolService;
 
+    private final AgentToolRolloutService rolloutService;
+
+    private final ShadowToolDecisionService shadowDecisionService;
+
     private final ConfirmationService confirmationService;
 
     private final ConversationStateService conversationStateService;
@@ -81,6 +94,37 @@ public class AgentChatService {
     private final AgentContextBuilder agentContextBuilder;
 
     private final ObjectMapper objectMapper;
+
+    private final CostGovernanceService costGovernanceService;
+
+    @Autowired
+    public AgentChatService(
+            LlmClient llmClient,
+            LlmProperties llmProperties,
+            ToolRegistry toolRegistry,
+            ToolExecutionService toolExecutionService,
+            AllowedToolService allowedToolService,
+            AgentToolRolloutService rolloutService,
+            ShadowToolDecisionService shadowDecisionService,
+            ConfirmationService confirmationService,
+            ConversationStateService conversationStateService,
+            AgentContextBuilder agentContextBuilder,
+            ObjectMapper objectMapper,
+            CostGovernanceService costGovernanceService
+    ) {
+        this.llmClient = llmClient;
+        this.llmProperties = llmProperties;
+        this.toolRegistry = toolRegistry;
+        this.toolExecutionService = toolExecutionService;
+        this.allowedToolService = allowedToolService;
+        this.rolloutService = rolloutService;
+        this.shadowDecisionService = shadowDecisionService;
+        this.confirmationService = confirmationService;
+        this.conversationStateService = conversationStateService;
+        this.agentContextBuilder = agentContextBuilder;
+        this.objectMapper = objectMapper;
+        this.costGovernanceService = costGovernanceService;
+    }
 
     public AgentChatService(
             LlmClient llmClient,
@@ -93,15 +137,20 @@ public class AgentChatService {
             AgentContextBuilder agentContextBuilder,
             ObjectMapper objectMapper
     ) {
-        this.llmClient = llmClient;
-        this.llmProperties = llmProperties;
-        this.toolRegistry = toolRegistry;
-        this.toolExecutionService = toolExecutionService;
-        this.allowedToolService = allowedToolService;
-        this.confirmationService = confirmationService;
-        this.conversationStateService = conversationStateService;
-        this.agentContextBuilder = agentContextBuilder;
-        this.objectMapper = objectMapper;
+        this(
+                llmClient,
+                llmProperties,
+                toolRegistry,
+                toolExecutionService,
+                allowedToolService,
+                new AgentToolRolloutService(),
+                new ShadowToolDecisionService(objectMapper),
+                confirmationService,
+                conversationStateService,
+                agentContextBuilder,
+                objectMapper,
+                defaultCostGovernanceService(llmProperties)
+        );
     }
 
     public AgentChatResponse chat(String conversationId, String message) {
@@ -123,6 +172,15 @@ public class AgentChatService {
         try {
             List<LlmMessage> decisionMessages = agentContextBuilder.buildMessages(context.getUserId(), state.getConversationId(), message, allowedToolNames);
             long decisionStartedAt = System.nanoTime();
+            costGovernanceService.checkBeforeLlm(
+                    context.getTenantId(),
+                    context.getUserId(),
+                    "AGENT_CHAT_DECISION",
+                    TOOL_DECISION_PROMPT.formatted(serializeAllowedToolDefinitions(allowedToolNames)),
+                    decisionMessages,
+                    costGovernanceService.properties().getChatMaxInputTokens(),
+                    llmProperties.getMaxOutputTokens()
+            );
             LlmGenerationResult decisionResult = llmClient.generateWithUsage(
                     TOOL_DECISION_PROMPT.formatted(serializeAllowedToolDefinitions(allowedToolNames)),
                     decisionMessages
@@ -131,6 +189,18 @@ public class AgentChatService {
             decision = parseDecision(rawDecision);
             boolean hasToolCall = decision.getToolCall() != null && StringUtils.hasText(decision.getToolCall().getToolName());
             long elapsedMs = elapsedMillis(decisionStartedAt);
+            costGovernanceService.recordUsage(
+                    context.getRequestId(),
+                    context.getTenantId(),
+                    context.getUserId(),
+                    "AGENT_CHAT_DECISION",
+                    ModelTier.FAST,
+                    TOOL_DECISION_PROMPT.formatted(serializeAllowedToolDefinitions(allowedToolNames)),
+                    decisionMessages,
+                    decisionResult,
+                    elapsedMs,
+                    true
+            );
             logLlmCall(context, "tool_decision", decisionMessages.size(), allowedToolNames.size(), hasToolCall, hasToolCall ? "TOOL_CALL" : "FINAL_ANSWER", elapsedMs, decisionResult);
             steps.add(step(context, state, 1, AgentActionType.MODEL_CALL, null, null, true, null, elapsedMs, null));
         } catch (LlmException exception) {
@@ -155,17 +225,60 @@ public class AgentChatService {
         String argumentsSummary = summarizeArguments(toolCall.getArguments());
         steps.add(step(context, state, 2, AgentActionType.TOOL_CALL, toolName, argumentsSummary, true, null, 0, null));
         if (!allowedToolNames.contains(toolName)) {
+            ToolDefinition definition = toolRegistry.findDefinition(toolName).orElse(null);
+            AgentToolRolloutDecision visibilityDecision = definition == null ? AgentToolRolloutDecision.allow() : rolloutService.visibilityDecision(toolName, context);
+            String errorCode = visibilityDecision.isRolloutBlocked()
+                    ? AgentErrorCode.ROLLOUT_BLOCKED.name()
+                    : AgentErrorCode.PERMISSION_DENIED.name();
+            if (visibilityDecision.isRolloutBlocked()) {
+                recordShadowDecision(context, toolName, toolCall.getArguments(), "NOT_VALIDATED", definition.getRiskLevel(), visibilityDecision, 0);
+            }
             log.warn("agent_chat blocked_tool: requestId={}, toolName={}, reason=NOT_ALLOWED",
                     context.getRequestId(),
                     toolName);
-            ToolResult deniedResult = ToolResult.failure(toolName, AgentErrorCode.PERMISSION_DENIED.name(), "current user is not allowed to call this tool", 0);
-            steps.add(step(context, state, 3, AgentActionType.STOP, toolName, argumentsSummary, false, AgentErrorCode.PERMISSION_DENIED.name(), 0, AgentErrorCode.PERMISSION_DENIED.name()));
-            return chatResponse("当前用户无权调用该工具。", false, toolName, deniedResult, context, state, false, null, null, steps, AgentErrorCode.PERMISSION_DENIED.name());
+            ToolResult deniedResult = ToolResult.failure(toolName, errorCode, "current user is not allowed to call this tool", 0);
+            steps.add(step(context, state, 3, AgentActionType.STOP, toolName, argumentsSummary, false, errorCode, 0, errorCode));
+            AgentChatResponse response = chatResponse(
+                    visibilityDecision.isRolloutBlocked() ? "该工具尚未对当前用户开放。" : "当前用户无权调用该工具。",
+                    false,
+                    toolName,
+                    deniedResult,
+                    context,
+                    state,
+                    false,
+                    null,
+                    null,
+                    steps,
+                    errorCode
+            );
+            response.setToolDebugInfo(visibilityDecision.isRolloutBlocked() ? debugInfo(toolName, visibilityDecision) : null);
+            return response;
         }
 
         ToolDefinition definition = toolRegistry.findDefinition(toolName).orElse(null);
+        AgentToolRolloutDecision rolloutDecision = rolloutService.evaluate(toolName, context, 1);
+        if (rolloutDecision.getPolicyDecision() == ShadowToolPolicyDecision.MAX_CALLS_EXCEEDED || rolloutDecision.isRolloutBlocked()) {
+            String errorCode = rolloutDecision.getPolicyDecision() == ShadowToolPolicyDecision.MAX_CALLS_EXCEEDED
+                    ? AgentErrorCode.TOOL_MAX_CALLS_EXCEEDED.name()
+                    : AgentErrorCode.ROLLOUT_BLOCKED.name();
+            recordShadowDecision(context, toolName, toolCall.getArguments(), "NOT_VALIDATED", definition == null ? null : definition.getRiskLevel(), rolloutDecision, 0);
+            steps.add(step(context, state, 3, AgentActionType.STOP, toolName, argumentsSummary, false, errorCode, 0, errorCode));
+            AgentChatResponse response = chatResponse("该工具当前已被灰度策略拦截。", false, toolName, null, context, state, false, null, null, steps, errorCode);
+            response.setToolDebugInfo(debugInfo(toolName, rolloutDecision));
+            return response;
+        }
+        if (rolloutDecision.isShadowOnly()) {
+            return shadowOnlyResponse(toolName, toolCall.getArguments(), context, state, steps, argumentsSummary, definition, rolloutDecision);
+        }
+        if (rolloutDecision.isRequiresConfirmation()) {
+            AgentChatResponse response = createConfirmationResponse(toolName, toolCall.getArguments(), context, state, steps, argumentsSummary);
+            response.setToolDebugInfo(debugInfo(toolName, rolloutDecision));
+            return response;
+        }
         if (definition != null && definition.getRiskLevel() == RiskLevel.HIGH) {
-            return createConfirmationResponse(toolName, toolCall.getArguments(), context, state, steps, argumentsSummary);
+            AgentChatResponse response = createConfirmationResponse(toolName, toolCall.getArguments(), context, state, steps, argumentsSummary);
+            response.setToolDebugInfo(new AgentToolDebugInfo(toolName, false, false, true, "HIGH_RISK_TOOL"));
+            return response;
         }
 
         long toolStartedAt = System.nanoTime();
@@ -187,9 +300,30 @@ public class AgentChatService {
         try {
             List<LlmMessage> finalMessages = buildFinalAnswerMessages(message, rawDecision, toolResult);
             long finalStartedAt = System.nanoTime();
+            costGovernanceService.checkBeforeLlm(
+                    context.getTenantId(),
+                    context.getUserId(),
+                    "AGENT_CHAT_FINAL",
+                    FINAL_ANSWER_PROMPT,
+                    finalMessages,
+                    costGovernanceService.properties().getChatMaxInputTokens(),
+                    llmProperties.getMaxOutputTokens()
+            );
             LlmGenerationResult finalResult = llmClient.generateWithUsage(FINAL_ANSWER_PROMPT, finalMessages);
             finalAnswer = finalResult.getAnswer();
             long elapsedMs = elapsedMillis(finalStartedAt);
+            costGovernanceService.recordUsage(
+                    context.getRequestId(),
+                    context.getTenantId(),
+                    context.getUserId(),
+                    "AGENT_CHAT_FINAL",
+                    ModelTier.STANDARD,
+                    FINAL_ANSWER_PROMPT,
+                    finalMessages,
+                    finalResult,
+                    elapsedMs,
+                    true
+            );
             logLlmCall(context, "final_answer", finalMessages.size(), 0, false, "FINAL_ANSWER", elapsedMs, finalResult);
             steps.add(step(context, state, 4, AgentActionType.MODEL_CALL, null, null, true, null, elapsedMs, null));
         } catch (LlmException exception) {
@@ -203,9 +337,49 @@ public class AgentChatService {
         return chatResponse(finalAnswer, true, toolName, toolResult, context, state, false, null, null, steps, "FINAL_ANSWER");
     }
 
+    private AgentChatResponse shadowOnlyResponse(
+            String toolName,
+            JsonNode arguments,
+            ToolExecutionContext context,
+            ConversationState state,
+            List<AgentStep> steps,
+            String argumentsSummary,
+            ToolDefinition definition,
+            AgentToolRolloutDecision rolloutDecision
+    ) {
+        try {
+            toolExecutionService.validate(toolName, arguments, context);
+            recordShadowDecision(context, toolName, arguments, "OK", definition == null ? null : definition.getRiskLevel(), rolloutDecision, 0);
+            steps.add(step(context, state, 3, AgentActionType.STOP, toolName, argumentsSummary, true, AgentErrorCode.TOOL_SHADOWED.name(), 0, AgentErrorCode.TOOL_SHADOWED.name()));
+            AgentChatResponse response = chatResponse(
+                    "工具处于 Shadow Mode，已完成校验并记录决策，但不会实际执行。",
+                    false,
+                    toolName,
+                    null,
+                    context,
+                    state,
+                    false,
+                    null,
+                    null,
+                    steps,
+                    AgentErrorCode.TOOL_SHADOWED.name()
+            );
+            response.setToolDebugInfo(debugInfo(toolName, rolloutDecision));
+            return response;
+        } catch (ToolException exception) {
+            String errorCode = StringUtils.hasText(exception.getErrorType()) ? exception.getErrorType() : AgentErrorCode.VALIDATION_ERROR.name();
+            recordShadowDecision(context, toolName, arguments, "FAILED:" + errorCode, definition == null ? null : definition.getRiskLevel(), rolloutDecision, 0);
+            ToolResult result = ToolResult.failure(toolName, errorCode, exception.getMessage(), 0);
+            steps.add(step(context, state, 3, AgentActionType.STOP, toolName, argumentsSummary, false, errorCode, 0, errorCode));
+            AgentChatResponse response = chatResponse("Shadow Mode 工具参数或权限校验失败。", false, toolName, result, context, state, false, null, null, steps, errorCode);
+            response.setToolDebugInfo(debugInfo(toolName, rolloutDecision));
+            return response;
+        }
+    }
+
     public ToolExecutionContext mockContext() {
         return new ToolExecutionContext(
-                UUID.randomUUID().toString(),
+                RequestContext.requestIdOr(UUID.randomUUID().toString()),
                 "user_001",
                 "default-department",
                 1
@@ -424,6 +598,44 @@ public class AgentChatService {
         );
     }
 
+    private AgentToolDebugInfo debugInfo(String toolName, AgentToolRolloutDecision decision) {
+        return new AgentToolDebugInfo(
+                toolName,
+                decision.isShadowOnly(),
+                decision.isRolloutBlocked(),
+                decision.isRequiresConfirmation(),
+                decision.getBlockedReason()
+        );
+    }
+
+    private void recordShadowDecision(
+            ToolExecutionContext context,
+            String toolName,
+            JsonNode arguments,
+            String validationResult,
+            RiskLevel riskLevel,
+            AgentToolRolloutDecision rolloutDecision,
+            long latencyMs
+    ) {
+        shadowDecisionService.record(
+                context,
+                toolName,
+                arguments,
+                validationResult,
+                riskLevel,
+                rolloutDecision.getPolicyDecision(),
+                rolloutDecision.getBlockedReason(),
+                llmProperties.getModel(),
+                latencyMs
+        );
+        log.info("agent_tool_rollout_decision requestId={} toolName={} policyDecision={} validationResult={} blockedReason={}",
+                context.getRequestId(),
+                toolName,
+                rolloutDecision.getPolicyDecision(),
+                validationResult,
+                rolloutDecision.getBlockedReason());
+    }
+
     private static String sanitizeAnswerForUser(String answer) {
         if (!StringUtils.hasText(answer)) {
             return answer;
@@ -466,15 +678,20 @@ public class AgentChatService {
                 elapsedMs,
                 stopReason
         );
-        log.info("agent_step requestId={} conversationId={} stepIndex={} actionType={} toolName={} success={} errorCode={} elapsedMs={} stopReason={}",
+        ToolDefinition definition = StringUtils.hasText(toolName) ? toolRegistry.findDefinition(toolName).orElse(null) : null;
+        boolean requiresConfirmation = AgentErrorCode.CONFIRMATION_REQUIRED.name().equals(errorCode)
+                || AgentErrorCode.CONFIRMATION_REQUIRED.name().equals(stopReason);
+        log.info("agent_step requestId={} conversationId={} stepIndex={} actionType={} toolName={} riskLevel={} latencyMs={} success={} errorCode={} requiresConfirmation={} stopReason={}",
                 step.getRequestId(),
                 step.getConversationId(),
                 step.getStepIndex(),
                 step.getActionType(),
                 step.getToolName(),
+                definition == null ? null : definition.getRiskLevel(),
+                step.getElapsedMs(),
                 step.isSuccess(),
                 step.getErrorCode(),
-                step.getElapsedMs(),
+                requiresConfirmation,
                 step.getStopReason());
         return step;
     }
@@ -527,5 +744,16 @@ public class AgentChatService {
 
     private static long elapsedMillis(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000;
+    }
+
+    private static CostGovernanceService defaultCostGovernanceService(LlmProperties llmProperties) {
+        return new CostGovernanceService(
+                new CostProperties(),
+                new TokenEstimator(),
+                new QuotaService(),
+                new RateLimitService(),
+                new UsageRecordService(),
+                llmProperties
+        );
     }
 }

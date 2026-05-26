@@ -4,63 +4,55 @@ import java.util.List;
 
 public class RagEvalResult {
 
-    private String id;
+    private String caseId;
 
     private String question;
 
-    private String expectedAnswer;
+    private List<RagSearchResult> retrievedChunks;
 
-    private String actualAnswer;
+    private List<String> expectedSourceChunkIds;
 
-    private String expectedDocumentId;
+    private List<String> expectedSourceDocumentIds;
 
-    private List<String> retrievedDocumentIds;
+    private boolean hitAtK;
 
-    private boolean hitExpectedDocument;
+    private double recallAtK;
 
-    private List<String> expectedKeywords;
+    private double mrr;
 
-    private boolean keywordMatched;
+    private List<String> hitChunkIds;
+
+    private String answer;
 
     private List<RagSource> sources;
 
-    private boolean passed;
+    private boolean hasAnswer;
+
+    private boolean noAnswerFallback;
+
+    private boolean sourcesContainExpectedDocuments;
+
+    private boolean answerContainsExpectedPhrase;
+
+    private long latencyMs;
+
+    private RagTokenUsage tokenUsage;
+
+    private boolean success = true;
+
+    private String errorCode;
+
+    private String errorMessage;
 
     public RagEvalResult() {
     }
 
-    public RagEvalResult(
-            String id,
-            String question,
-            String expectedAnswer,
-            String actualAnswer,
-            String expectedDocumentId,
-            List<String> retrievedDocumentIds,
-            boolean hitExpectedDocument,
-            List<String> expectedKeywords,
-            boolean keywordMatched,
-            List<RagSource> sources,
-            boolean passed
-    ) {
-        this.id = id;
-        this.question = question;
-        this.expectedAnswer = expectedAnswer;
-        this.actualAnswer = actualAnswer;
-        this.expectedDocumentId = expectedDocumentId;
-        this.retrievedDocumentIds = retrievedDocumentIds;
-        this.hitExpectedDocument = hitExpectedDocument;
-        this.expectedKeywords = expectedKeywords;
-        this.keywordMatched = keywordMatched;
-        this.sources = sources;
-        this.passed = passed;
+    public String getCaseId() {
+        return caseId;
     }
 
-    public String getId() {
-        return id;
-    }
-
-    public void setId(String id) {
-        this.id = id;
+    public void setCaseId(String caseId) {
+        this.caseId = caseId;
     }
 
     public String getQuestion() {
@@ -71,60 +63,68 @@ public class RagEvalResult {
         this.question = question;
     }
 
-    public String getExpectedAnswer() {
-        return expectedAnswer;
+    public List<RagSearchResult> getRetrievedChunks() {
+        return retrievedChunks;
     }
 
-    public void setExpectedAnswer(String expectedAnswer) {
-        this.expectedAnswer = expectedAnswer;
+    public void setRetrievedChunks(List<RagSearchResult> retrievedChunks) {
+        this.retrievedChunks = retrievedChunks;
     }
 
-    public String getActualAnswer() {
-        return actualAnswer;
+    public List<String> getExpectedSourceChunkIds() {
+        return expectedSourceChunkIds;
     }
 
-    public void setActualAnswer(String actualAnswer) {
-        this.actualAnswer = actualAnswer;
+    public void setExpectedSourceChunkIds(List<String> expectedSourceChunkIds) {
+        this.expectedSourceChunkIds = expectedSourceChunkIds;
     }
 
-    public String getExpectedDocumentId() {
-        return expectedDocumentId;
+    public List<String> getExpectedSourceDocumentIds() {
+        return expectedSourceDocumentIds;
     }
 
-    public void setExpectedDocumentId(String expectedDocumentId) {
-        this.expectedDocumentId = expectedDocumentId;
+    public void setExpectedSourceDocumentIds(List<String> expectedSourceDocumentIds) {
+        this.expectedSourceDocumentIds = expectedSourceDocumentIds;
     }
 
-    public List<String> getRetrievedDocumentIds() {
-        return retrievedDocumentIds;
+    public boolean isHitAtK() {
+        return hitAtK;
     }
 
-    public void setRetrievedDocumentIds(List<String> retrievedDocumentIds) {
-        this.retrievedDocumentIds = retrievedDocumentIds;
+    public void setHitAtK(boolean hitAtK) {
+        this.hitAtK = hitAtK;
     }
 
-    public boolean isHitExpectedDocument() {
-        return hitExpectedDocument;
+    public double getRecallAtK() {
+        return recallAtK;
     }
 
-    public void setHitExpectedDocument(boolean hitExpectedDocument) {
-        this.hitExpectedDocument = hitExpectedDocument;
+    public void setRecallAtK(double recallAtK) {
+        this.recallAtK = recallAtK;
     }
 
-    public List<String> getExpectedKeywords() {
-        return expectedKeywords;
+    public double getMrr() {
+        return mrr;
     }
 
-    public void setExpectedKeywords(List<String> expectedKeywords) {
-        this.expectedKeywords = expectedKeywords;
+    public void setMrr(double mrr) {
+        this.mrr = mrr;
     }
 
-    public boolean isKeywordMatched() {
-        return keywordMatched;
+    public List<String> getHitChunkIds() {
+        return hitChunkIds;
     }
 
-    public void setKeywordMatched(boolean keywordMatched) {
-        this.keywordMatched = keywordMatched;
+    public void setHitChunkIds(List<String> hitChunkIds) {
+        this.hitChunkIds = hitChunkIds;
+    }
+
+    public String getAnswer() {
+        return answer;
+    }
+
+    public void setAnswer(String answer) {
+        this.answer = answer;
     }
 
     public List<RagSource> getSources() {
@@ -135,11 +135,75 @@ public class RagEvalResult {
         this.sources = sources;
     }
 
-    public boolean isPassed() {
-        return passed;
+    public boolean isHasAnswer() {
+        return hasAnswer;
     }
 
-    public void setPassed(boolean passed) {
-        this.passed = passed;
+    public void setHasAnswer(boolean hasAnswer) {
+        this.hasAnswer = hasAnswer;
+    }
+
+    public boolean isNoAnswerFallback() {
+        return noAnswerFallback;
+    }
+
+    public void setNoAnswerFallback(boolean noAnswerFallback) {
+        this.noAnswerFallback = noAnswerFallback;
+    }
+
+    public boolean isSourcesContainExpectedDocuments() {
+        return sourcesContainExpectedDocuments;
+    }
+
+    public void setSourcesContainExpectedDocuments(boolean sourcesContainExpectedDocuments) {
+        this.sourcesContainExpectedDocuments = sourcesContainExpectedDocuments;
+    }
+
+    public boolean isAnswerContainsExpectedPhrase() {
+        return answerContainsExpectedPhrase;
+    }
+
+    public void setAnswerContainsExpectedPhrase(boolean answerContainsExpectedPhrase) {
+        this.answerContainsExpectedPhrase = answerContainsExpectedPhrase;
+    }
+
+    public long getLatencyMs() {
+        return latencyMs;
+    }
+
+    public void setLatencyMs(long latencyMs) {
+        this.latencyMs = latencyMs;
+    }
+
+    public RagTokenUsage getTokenUsage() {
+        return tokenUsage;
+    }
+
+    public void setTokenUsage(RagTokenUsage tokenUsage) {
+        this.tokenUsage = tokenUsage;
+    }
+
+    public boolean isSuccess() {
+        return success;
+    }
+
+    public void setSuccess(boolean success) {
+        this.success = success;
+    }
+
+    public String getErrorCode() {
+        return errorCode;
+    }
+
+    public void setErrorCode(String errorCode) {
+        this.errorCode = errorCode;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public void setErrorMessage(String errorMessage) {
+        this.errorMessage = errorMessage;
     }
 }

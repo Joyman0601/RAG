@@ -5,6 +5,10 @@ spring:
   application:
     name: rag-learning
 
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{requestId:-no-request}] %logger{36} - %msg%n"
+
 rag:
   debug-enabled: ${RAG_DEBUG_ENABLED:false}
   chunk-size: ${RAG_CHUNK_SIZE:600}
@@ -31,6 +35,26 @@ llm:
   proxy-port: ${LLM_PROXY_PORT:0}
 
 agent:
+  tool-rollout:
+    tools:
+      query_order:
+        enabled: ${AGENT_TOOL_QUERY_ORDER_ENABLED:true}
+        shadow-only: ${AGENT_TOOL_QUERY_ORDER_SHADOW_ONLY:false}
+        auto-execute: ${AGENT_TOOL_QUERY_ORDER_AUTO_EXECUTE:true}
+        requires-confirmation: ${AGENT_TOOL_QUERY_ORDER_REQUIRES_CONFIRMATION:false}
+        max-calls-per-request: ${AGENT_TOOL_QUERY_ORDER_MAX_CALLS_PER_REQUEST:3}
+      search_knowledge_base:
+        enabled: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_ENABLED:true}
+        shadow-only: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_SHADOW_ONLY:false}
+        auto-execute: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_AUTO_EXECUTE:true}
+        requires-confirmation: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_REQUIRES_CONFIRMATION:false}
+        max-calls-per-request: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_MAX_CALLS_PER_REQUEST:3}
+      cancel_order:
+        enabled: ${AGENT_TOOL_CANCEL_ORDER_ENABLED:true}
+        shadow-only: ${AGENT_TOOL_CANCEL_ORDER_SHADOW_ONLY:false}
+        auto-execute: ${AGENT_TOOL_CANCEL_ORDER_AUTO_EXECUTE:false}
+        requires-confirmation: ${AGENT_TOOL_CANCEL_ORDER_REQUIRES_CONFIRMATION:true}
+        max-calls-per-request: ${AGENT_TOOL_CANCEL_ORDER_MAX_CALLS_PER_REQUEST:1}
   safety:
     max-input-length: ${AGENT_SAFETY_MAX_INPUT_LENGTH:2000}
     max-output-tokens: ${AGENT_SAFETY_MAX_OUTPUT_TOKENS:800}

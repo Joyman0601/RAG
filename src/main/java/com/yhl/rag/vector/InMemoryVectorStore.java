@@ -3,6 +3,7 @@ package com.yhl.rag.vector;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
@@ -96,28 +97,44 @@ public class InMemoryVectorStore implements VectorStore {
     }
 
     private boolean matchesFilter(DocumentChunk chunk, VectorSearchRequest request) {
+        if (!StringUtils.hasText(request.getTenantId()) || !request.getTenantId().equals(chunk.getTenantId())) {
+            return false;
+        }
         if (request.getStatus() != null && chunk.getStatus() != request.getStatus()) {
+            return false;
+        }
+        if (request.getDocumentStatus() != null && chunk.getDocumentStatus() != request.getDocumentStatus()) {
             return false;
         }
         if (request.getVersion() != null && chunk.getVersion() != request.getVersion()) {
             return false;
         }
+        if (request.getDocumentVersions() != null) {
+            Integer currentVersion = request.getDocumentVersions().get(chunk.getDocumentId());
+            if (currentVersion == null || chunk.getVersion() != currentVersion) {
+                return false;
+            }
+        }
         if (request.getVisibility() != null && chunk.getVisibility() != request.getVisibility()) {
             return false;
         }
-        return canAccess(chunk, request.getUserId(), request.getDepartment());
+        return canAccess(chunk, request);
     }
 
-    private boolean canAccess(DocumentChunk chunk, String userId, String department) {
+    private boolean canAccess(DocumentChunk chunk, VectorSearchRequest request) {
         DocumentVisibility visibility = chunk.getVisibility();
-        if (visibility == DocumentVisibility.PUBLIC) {
+        if (visibility == DocumentVisibility.PRIVATE) {
+            return StringUtils.hasText(request.getUserId()) && request.getUserId().equals(chunk.getOwnerId());
+        }
+        if (visibility == DocumentVisibility.DEPARTMENT) {
+            return request.getDepartmentIds().contains(chunk.getDepartmentId());
+        }
+        if (visibility == DocumentVisibility.TENANT || visibility == DocumentVisibility.PUBLIC) {
             return true;
         }
-        if (visibility == DocumentVisibility.PRIVATE) {
-            return StringUtils.hasText(userId) && userId.equals(chunk.getOwnerId());
-        }
-        if (visibility == DocumentVisibility.INTERNAL) {
-            return StringUtils.hasText(department) && department.equals(chunk.getDepartment());
+        if (visibility == DocumentVisibility.CUSTOM) {
+            return containsAny(chunk.getAllowedUserIds(), singletonIfText(request.getUserId()))
+                    || containsAny(chunk.getAllowedRoleIds(), request.getRoleIds());
         }
         return false;
     }
@@ -169,7 +186,7 @@ public class InMemoryVectorStore implements VectorStore {
     }
 
     private static DocumentChunk copyChunk(DocumentChunk chunk) {
-        return new DocumentChunk(
+        DocumentChunk copied = new DocumentChunk(
                 chunk.getChunkId(),
                 chunk.getDocumentId(),
                 chunk.getFilename(),
@@ -177,13 +194,34 @@ public class InMemoryVectorStore implements VectorStore {
                 chunk.getContentHash(),
                 chunk.getChunkIndex(),
                 chunk.getCreatedAt(),
+                chunk.getTenantId(),
+                chunk.getOwnerId(),
+                chunk.getDepartmentId(),
+                chunk.getVisibility(),
+                chunk.getAllowedUserIds(),
+                chunk.getAllowedRoleIds(),
                 chunk.getStatus() == null ? DocumentStatus.ACTIVE : chunk.getStatus(),
                 chunk.getVersion(),
-                chunk.getOwnerId(),
-                chunk.getDepartment(),
-                chunk.getVisibility(),
                 chunk.getPermissionLevel()
         );
+        copied.setDocumentStatus(chunk.getDocumentStatus() == null ? DocumentStatus.READY : chunk.getDocumentStatus());
+        return copied;
+    }
+
+    private static boolean containsAny(Set<String> left, Set<String> right) {
+        if (left == null || right == null || left.isEmpty() || right.isEmpty()) {
+            return false;
+        }
+        for (String value : right) {
+            if (left.contains(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<String> singletonIfText(String value) {
+        return StringUtils.hasText(value) ? Set.of(value) : Set.of();
     }
 
     private record Entry(DocumentChunk chunk, List<Double> embedding) {

@@ -73,6 +73,30 @@ class ToolExecutionServiceTest {
     }
 
     @Test
+    void searchKnowledge_whenTopKIsProvided_allowsModelControlledLimitOnly() {
+        ToolResult result = toolExecutionService.execute("search_knowledge_base", json("""
+                {"query":"退款政策","topK":3}
+                """), TestSupport.context());
+
+        assertThat(result.isSuccess()).isTrue();
+    }
+
+    @Test
+    void searchKnowledge_whenTenantOrDepartmentIsProvided_rejectsPrivilegeEscalation() {
+        ToolResult tenantResult = toolExecutionService.execute("search_knowledge_base", json("""
+                {"query":"退款政策","tenantId":"tenant-other"}
+                """), TestSupport.context());
+        ToolResult departmentResult = toolExecutionService.execute("search_knowledge_base", json("""
+                {"query":"退款政策","departmentId":"finance"}
+                """), TestSupport.context());
+
+        assertThat(tenantResult.isSuccess()).isFalse();
+        assertThat(tenantResult.getErrorCode()).isEqualTo(AgentErrorCode.PERMISSION_DENIED.name());
+        assertThat(departmentResult.isSuccess()).isFalse();
+        assertThat(departmentResult.getErrorCode()).isEqualTo(AgentErrorCode.PERMISSION_DENIED.name());
+    }
+
+    @Test
     void execute_whenToolNameIsUnknown_returnsUnknownTool() {
         ToolResult result = toolExecutionService.execute("admin_query_user", json("""
                 {"userId":"user_002"}

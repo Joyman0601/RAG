@@ -28,7 +28,7 @@ public class DocumentController {
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public DocumentInfo upload(@NotNull(message = "file cannot be null") @RequestPart("file") MultipartFile file) {
+    public DocumentUploadResponse upload(@NotNull(message = "file cannot be null") @RequestPart("file") MultipartFile file) {
         return documentService.upload(file);
     }
 
@@ -53,5 +53,10 @@ public class DocumentController {
     @GetMapping("/{documentId}/chunks")
     public List<DocumentChunk> listChunks(@NotBlank(message = "documentId cannot be blank") @PathVariable String documentId) {
         return documentService.listChunks(documentId);
+    }
+
+    @GetMapping("/{documentId}/ingest-status")
+    public DocumentIngestTask ingestStatus(@NotBlank(message = "documentId cannot be blank") @PathVariable String documentId) {
+        return documentService.getIngestStatus(documentId);
     }
 }

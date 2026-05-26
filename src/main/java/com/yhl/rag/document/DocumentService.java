@@ -12,16 +12,19 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import com.yhl.rag.llm.EmbeddingClient;
 import com.yhl.rag.llm.LlmProperties;
+import com.yhl.rag.rag.KnowledgeBaseVersionService;
 import com.yhl.rag.rag.RagProperties;
 import com.yhl.rag.security.CurrentUser;
 import com.yhl.rag.security.MockCurrentUserProvider;
 import com.yhl.rag.vector.VectorStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -43,78 +46,94 @@ public class DocumentService {
     private final EmbeddingClient embeddingClient;
     private final MockCurrentUserProvider currentUserProvider;
     private final VectorStore vectorStore;
+    private final DocumentIngestTaskService ingestTaskService;
+    private final KnowledgeBaseVersionService knowledgeBaseVersionService;
     private final ConcurrentMap<String, DocumentInfo> documentInfoStore = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> documentTextStore = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, byte[]> rawDocumentStore = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<DocumentChunk>> documentChunkStore = new ConcurrentHashMap<>();
 
+    @Autowired
     public DocumentService(
             RagProperties ragProperties,
             LlmProperties llmProperties,
             EmbeddingClient embeddingClient,
             MockCurrentUserProvider currentUserProvider,
-            VectorStore vectorStore
+            VectorStore vectorStore,
+            DocumentIngestTaskService ingestTaskService,
+            KnowledgeBaseVersionService knowledgeBaseVersionService
     ) {
         this.ragProperties = ragProperties;
         this.llmProperties = llmProperties;
         this.embeddingClient = embeddingClient;
         this.currentUserProvider = currentUserProvider;
         this.vectorStore = vectorStore;
+        this.ingestTaskService = ingestTaskService;
+        this.knowledgeBaseVersionService = knowledgeBaseVersionService;
     }
 
-    public DocumentInfo upload(MultipartFile file) {
+    public DocumentService(
+            RagProperties ragProperties,
+            LlmProperties llmProperties,
+            EmbeddingClient embeddingClient,
+            MockCurrentUserProvider currentUserProvider,
+            VectorStore vectorStore,
+            DocumentIngestTaskService ingestTaskService
+    ) {
+        this(
+                ragProperties,
+                llmProperties,
+                embeddingClient,
+                currentUserProvider,
+                vectorStore,
+                ingestTaskService,
+                new KnowledgeBaseVersionService()
+        );
+    }
+
+    public DocumentUploadResponse upload(MultipartFile file) {
         validateFile(file);
 
         String filename = safeFilename(file.getOriginalFilename());
         String contentType = normalizeContentType(file.getContentType());
-        String content = readText(file);
+        byte[] rawContent = readBytes(file);
         String id = UUID.randomUUID().toString();
         CurrentUser currentUser = currentUserProvider.getCurrentUser();
-        DocumentVisibility visibility = DocumentVisibility.INTERNAL;
+        DocumentVisibility visibility = DocumentVisibility.DEPARTMENT;
         DocumentInfo documentInfo = new DocumentInfo(
                 id,
                 filename,
                 contentType,
                 file.getSize(),
                 Instant.now(),
-                DocumentStatus.ACTIVE,
-                1,
+                currentUser.getTenantId(),
                 currentUser.getUserId(),
                 currentUser.getDepartment(),
                 visibility,
-                currentUser.getPermissionLevel()
-        );
-
-        List<DocumentChunk> chunks = chunkText(
-                id,
-                filename,
-                content,
-                ragProperties.getChunkSize(),
-                ragProperties.getChunkOverlap(),
+                Set.of(),
+                Set.of(),
+                DocumentStatus.UPLOADED,
                 1,
-                currentUser.getUserId(),
-                currentUser.getDepartment(),
-                visibility,
                 currentUser.getPermissionLevel()
         );
-        Map<DocumentChunk, List<Double>> embeddings = embedChunks(id, chunks);
 
         documentInfoStore.put(id, documentInfo);
-        documentTextStore.put(id, content);
-        documentChunkStore.put(id, List.copyOf(chunks));
-        vectorStore.saveAll(embeddings);
+        rawDocumentStore.put(id, rawContent);
+        DocumentIngestTask task = ingestTaskService.create(id, documentInfo.getVersion());
+        long knowledgeBaseVersion = knowledgeBaseVersionService.incrementAndGet();
 
-        log.info("document_upload id={} filename={} contentType={} size={} textChars={} chunkCount={} ownerId={} department={} visibility={} permissionLevel={}",
+        log.info("document_upload_accepted id={} taskId={} filename={} contentType={} size={} ownerId={} department={} visibility={} permissionLevel={} knowledgeBaseVersion={}",
                 id,
+                task.getTaskId(),
                 filename,
                 contentType,
                 file.getSize(),
-                content.length(),
-                chunks.size(),
                 currentUser.getUserId(),
                 currentUser.getDepartment(),
                 visibility,
-                currentUser.getPermissionLevel());
-        return documentInfo;
+                currentUser.getPermissionLevel(),
+                knowledgeBaseVersion);
+        return new DocumentUploadResponse(id, task.getTaskId());
     }
 
     public DocumentInfo update(String documentId, MultipartFile file) {
@@ -144,9 +163,12 @@ public class DocumentService {
                 ragProperties.getChunkSize(),
                 ragProperties.getChunkOverlap(),
                 newVersion,
+                existingDocument.getTenantId(),
                 existingDocument.getOwnerId(),
-                existingDocument.getDepartment(),
+                existingDocument.getDepartmentId(),
                 visibility,
+                existingDocument.getAllowedUserIds(),
+                existingDocument.getAllowedRoleIds(),
                 existingDocument.getPermissionLevel()
         );
         Map<DocumentChunk, List<Double>> embeddings = embedChunks(documentId, newChunks);
@@ -155,7 +177,7 @@ public class DocumentService {
         existingDocument.setFilename(filename);
         existingDocument.setContentType(contentType);
         existingDocument.setSize(file.getSize());
-        existingDocument.setStatus(DocumentStatus.ACTIVE);
+        existingDocument.setStatus(DocumentStatus.READY);
         existingDocument.setVersion(newVersion);
 
         List<DocumentChunk> allChunks = new ArrayList<>(oldChunks);
@@ -163,14 +185,112 @@ public class DocumentService {
         documentTextStore.put(documentId, content);
         documentChunkStore.put(documentId, List.copyOf(allChunks));
         vectorStore.saveAll(embeddings);
+        long knowledgeBaseVersion = knowledgeBaseVersionService.incrementAndGet();
 
-        log.info("document_update documentId={} oldVersion={} newVersion={} deletedChunkCount={} newChunkCount={}",
+        log.info("document_update documentId={} oldVersion={} newVersion={} deletedChunkCount={} newChunkCount={} knowledgeBaseVersion={}",
                 documentId,
                 oldVersion,
                 newVersion,
                 deletedChunkCount,
-                newChunks.size());
+                newChunks.size(),
+                knowledgeBaseVersion);
         return existingDocument;
+    }
+
+    public boolean processIngestTask(DocumentIngestTask task) {
+        DocumentInfo documentInfo = documentInfoStore.get(task.getDocumentId());
+        if (documentInfo == null || documentInfo.getStatus() == DocumentStatus.DELETED) {
+            throw new DocumentException(ERROR_DOCUMENT_NOT_FOUND, "文档不存在：" + task.getDocumentId());
+        }
+        if (documentInfo.getVersion() != task.getDocumentVersion()) {
+            log.info("document_ingest_stale taskId={} documentId={} taskVersion={} currentVersion={}",
+                    task.getTaskId(),
+                    task.getDocumentId(),
+                    task.getDocumentVersion(),
+                    documentInfo.getVersion());
+            return false;
+        }
+
+        documentInfo.setStatus(DocumentStatus.PROCESSING);
+        cleanupVersionArtifacts(documentInfo.getId(), task.getDocumentVersion());
+
+        ingestTaskService.updateCurrentStep(task.getTaskId(), DocumentIngestStep.PARSE);
+        byte[] rawContent = rawDocumentStore.get(task.getDocumentId());
+        if (rawContent == null || rawContent.length == 0) {
+            throw new DocumentException(ERROR_EMPTY_FILE, "文档原始内容不存在");
+        }
+        String content = new String(rawContent, StandardCharsets.UTF_8);
+
+        ingestTaskService.updateCurrentStep(task.getTaskId(), DocumentIngestStep.CHUNK);
+        List<DocumentChunk> chunks = chunkText(
+                documentInfo.getId(),
+                documentInfo.getFilename(),
+                content,
+                ragProperties.getChunkSize(),
+                ragProperties.getChunkOverlap(),
+                documentInfo.getVersion(),
+                documentInfo.getTenantId(),
+                documentInfo.getOwnerId(),
+                documentInfo.getDepartmentId(),
+                documentInfo.getVisibility(),
+                documentInfo.getAllowedUserIds(),
+                documentInfo.getAllowedRoleIds(),
+                documentInfo.getPermissionLevel()
+        );
+        for (DocumentChunk chunk : chunks) {
+            chunk.setDocumentStatus(DocumentStatus.READY);
+        }
+        if (chunks.isEmpty()) {
+            throw new DocumentException(ERROR_EMPTY_FILE, "文档内容为空，无法生成 chunk");
+        }
+
+        ingestTaskService.updateCurrentStep(task.getTaskId(), DocumentIngestStep.EMBEDDING);
+        Map<DocumentChunk, List<Double>> embeddings = embedChunks(documentInfo.getId(), chunks);
+        if (embeddings.size() != chunks.size()) {
+            throw new DocumentException("DOCUMENT_EMBEDDING_COUNT_MISMATCH", "chunk 数和向量数不一致");
+        }
+
+        ingestTaskService.updateCurrentStep(task.getTaskId(), DocumentIngestStep.INDEXING);
+        vectorStore.saveAll(embeddings);
+        for (DocumentChunk chunk : chunks) {
+            if (vectorStore.getEmbedding(chunk.getChunkId()) == null) {
+                throw new DocumentException("DOCUMENT_VECTOR_SAVE_FAILED", "向量保存数量校验失败");
+            }
+        }
+
+        DocumentInfo latestDocument = documentInfoStore.get(task.getDocumentId());
+        if (latestDocument == null || latestDocument.getStatus() == DocumentStatus.DELETED) {
+            throw new DocumentException(ERROR_DOCUMENT_NOT_FOUND, "文档不存在：" + task.getDocumentId());
+        }
+        if (latestDocument.getVersion() != task.getDocumentVersion()) {
+            log.info("document_ingest_stale_before_ready taskId={} documentId={} taskVersion={} currentVersion={}",
+                    task.getTaskId(),
+                    task.getDocumentId(),
+                    task.getDocumentVersion(),
+                    latestDocument.getVersion());
+            cleanupVersionArtifacts(task.getDocumentId(), task.getDocumentVersion());
+            return false;
+        }
+
+        documentTextStore.put(documentInfo.getId(), content);
+        documentChunkStore.put(documentInfo.getId(), List.copyOf(chunks));
+        documentInfo.setStatus(DocumentStatus.READY);
+        long knowledgeBaseVersion = knowledgeBaseVersionService.incrementAndGet();
+
+        log.info("document_ingest_processed documentId={} taskId={} textChars={} chunkCount={} knowledgeBaseVersion={}",
+                documentInfo.getId(),
+                task.getTaskId(),
+                content.length(),
+                chunks.size(),
+                knowledgeBaseVersion);
+        return true;
+    }
+
+    public void markDocumentFailed(String documentId) {
+        DocumentInfo documentInfo = documentInfoStore.get(documentId);
+        if (documentInfo != null && documentInfo.getStatus() != DocumentStatus.DELETED) {
+            documentInfo.setStatus(DocumentStatus.FAILED);
+        }
     }
 
     public DocumentInfo delete(String documentId) {
@@ -190,13 +310,16 @@ public class DocumentService {
         documentInfo.setStatus(DocumentStatus.DELETED);
         documentChunkStore.put(documentId, List.copyOf(chunks));
         documentTextStore.remove(documentId);
+        rawDocumentStore.remove(documentId);
+        long knowledgeBaseVersion = knowledgeBaseVersionService.incrementAndGet();
 
-        log.info("document_delete documentId={} oldVersion={} newVersion={} deletedChunkCount={} newChunkCount={}",
+        log.info("document_delete documentId={} oldVersion={} newVersion={} deletedChunkCount={} newChunkCount={} knowledgeBaseVersion={}",
                 documentId,
                 oldVersion,
                 documentInfo.getVersion(),
                 deletedChunkCount,
-                0);
+                0,
+                knowledgeBaseVersion);
         return documentInfo;
     }
 
@@ -210,7 +333,7 @@ public class DocumentService {
                 1,
                 null,
                 null,
-                DocumentVisibility.INTERNAL,
+                DocumentVisibility.DEPARTMENT,
                 0
         );
     }
@@ -225,6 +348,38 @@ public class DocumentService {
             String ownerId,
             String department,
             DocumentVisibility visibility,
+            int permissionLevel
+    ) {
+        return chunkText(
+                documentId,
+                filename,
+                text,
+                chunkSize,
+                overlap,
+                version,
+                "tenant-default",
+                ownerId,
+                department,
+                visibility,
+                Set.of(),
+                Set.of(),
+                permissionLevel
+        );
+    }
+
+    public List<DocumentChunk> chunkText(
+            String documentId,
+            String filename,
+            String text,
+            int chunkSize,
+            int overlap,
+            int version,
+            String tenantId,
+            String ownerId,
+            String departmentId,
+            DocumentVisibility visibility,
+            Set<String> allowedUserIds,
+            Set<String> allowedRoleIds,
             int permissionLevel
     ) {
         validateChunkConfig(chunkSize, overlap);
@@ -250,18 +405,21 @@ public class DocumentService {
             int end = Math.min(start + chunkSize, normalizedText.length());
             String chunkContent = normalizedText.substring(start, end);
             chunks.add(new DocumentChunk(
-                    UUID.randomUUID().toString(),
+                    stableChunkId(documentId, version, chunkIndex, sha256Hex(chunkContent)),
                     documentId,
                     filename,
                     chunkContent,
                     sha256Hex(chunkContent),
                     chunkIndex,
                     createdAt,
+                    tenantId,
+                    ownerId,
+                    departmentId,
+                    visibility,
+                    allowedUserIds,
+                    allowedRoleIds,
                     DocumentStatus.ACTIVE,
                     version,
-                    ownerId,
-                    department,
-                    visibility,
                     permissionLevel
             ));
 
@@ -326,6 +484,72 @@ public class DocumentService {
         return Map.copyOf(documentInfoStore);
     }
 
+    public Map<String, Integer> getReadyDocumentVersionSnapshot() {
+        Map<String, Integer> versions = new HashMap<>();
+        for (DocumentInfo documentInfo : documentInfoStore.values()) {
+            if (documentInfo.getStatus() == DocumentStatus.READY) {
+                versions.put(documentInfo.getId(), documentInfo.getCurrentVersion());
+            }
+        }
+        return Map.copyOf(versions);
+    }
+
+    public boolean canAccessChunk(DocumentChunk chunk, CurrentUser currentUser) {
+        if (chunk == null || currentUser == null) {
+            return false;
+        }
+        if (chunk.getStatus() != DocumentStatus.ACTIVE || chunk.getDocumentStatus() != DocumentStatus.READY) {
+            return false;
+        }
+        DocumentInfo documentInfo = documentInfoStore.get(chunk.getDocumentId());
+        if (documentInfo == null || documentInfo.getStatus() != DocumentStatus.READY) {
+            return false;
+        }
+        if (!equalsText(documentInfo.getTenantId(), currentUser.getTenantId())
+                || !equalsText(chunk.getTenantId(), currentUser.getTenantId())) {
+            return false;
+        }
+        if (documentInfo.getCurrentVersion() != chunk.getVersion()) {
+            return false;
+        }
+        return canAccess(
+                currentUser,
+                chunk.getOwnerId(),
+                chunk.getDepartmentId(),
+                chunk.getVisibility(),
+                chunk.getAllowedUserIds(),
+                chunk.getAllowedRoleIds()
+        );
+    }
+
+    public static boolean canAccess(
+            CurrentUser currentUser,
+            String ownerId,
+            String departmentId,
+            DocumentVisibility visibility,
+            Set<String> allowedUserIds,
+            Set<String> allowedRoleIds
+    ) {
+        if (currentUser == null || visibility == null) {
+            return false;
+        }
+        return switch (visibility) {
+            case PRIVATE -> equalsText(currentUser.getUserId(), ownerId);
+            case DEPARTMENT -> currentUser.getDepartmentIds().contains(departmentId);
+            case TENANT, PUBLIC -> true;
+            case CUSTOM -> containsAny(allowedUserIds, Set.of(currentUser.getUserId()))
+                    || containsAny(allowedRoleIds, currentUser.getRoleIds());
+        };
+    }
+
+    public DocumentIngestTask getIngestStatus(String documentId) {
+        DocumentIngestTask task = ingestTaskService.getByDocumentId(documentId);
+        if (task == null) {
+            throw new DocumentException(ERROR_DOCUMENT_NOT_FOUND, "文档入库任务不存在：" + documentId);
+        }
+        return task;
+    }
+
     private Map<DocumentChunk, List<Double>> embedChunks(String documentId, List<DocumentChunk> chunks) {
         Map<DocumentChunk, List<Double>> embeddings = new HashMap<>();
         for (DocumentChunk chunk : chunks) {
@@ -350,10 +574,31 @@ public class DocumentService {
                 deletedChunkCount++;
             }
             chunk.setStatus(DocumentStatus.DELETED);
+            chunk.setDocumentStatus(DocumentStatus.DELETED);
             deletedChunkIds.add(chunk.getChunkId());
         }
         vectorStore.deleteByChunkIds(deletedChunkIds);
         return deletedChunkCount;
+    }
+
+    private void cleanupVersionArtifacts(String documentId, int version) {
+        List<DocumentChunk> chunks = new ArrayList<>(documentChunkStore.getOrDefault(documentId, List.of()));
+        if (chunks.isEmpty()) {
+            return;
+        }
+        List<String> deletedChunkIds = new ArrayList<>();
+        List<DocumentChunk> retainedChunks = new ArrayList<>();
+        for (DocumentChunk chunk : chunks) {
+            if (chunk.getVersion() == version) {
+                chunk.setStatus(DocumentStatus.DELETED);
+                chunk.setDocumentStatus(DocumentStatus.DELETED);
+                deletedChunkIds.add(chunk.getChunkId());
+            } else {
+                retainedChunks.add(chunk);
+            }
+        }
+        vectorStore.deleteByChunkIds(deletedChunkIds);
+        documentChunkStore.put(documentId, List.copyOf(retainedChunks));
     }
 
     private static void validateFile(MultipartFile file) {
@@ -381,8 +626,12 @@ public class DocumentService {
     }
 
     private static String readText(MultipartFile file) {
+        return new String(readBytes(file), StandardCharsets.UTF_8);
+    }
+
+    private static byte[] readBytes(MultipartFile file) {
         try {
-            return new String(file.getBytes(), StandardCharsets.UTF_8);
+            return file.getBytes();
         } catch (IOException exception) {
             throw new DocumentException(ERROR_READ_FAILED, "读取上传文件失败", exception);
         }
@@ -414,6 +663,22 @@ public class DocumentService {
                 || "application/octet-stream".equals(contentType);
     }
 
+    private static boolean containsAny(Set<String> left, Set<String> right) {
+        if (left == null || right == null || left.isEmpty() || right.isEmpty()) {
+            return false;
+        }
+        for (String value : right) {
+            if (left.contains(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean equalsText(String left, String right) {
+        return left != null && left.equals(right);
+    }
+
     private static String safeFilename(String filename) {
         if (!StringUtils.hasText(filename)) {
             return "unknown";
@@ -437,6 +702,11 @@ public class DocumentService {
         } catch (NoSuchAlgorithmException exception) {
             throw new DocumentException("DOCUMENT_HASH_FAILED", "计算 chunk hash 失败", exception);
         }
+    }
+
+    private static String stableChunkId(String documentId, int version, int chunkIndex, String contentHash) {
+        String hashPrefix = contentHash == null || contentHash.length() < 16 ? contentHash : contentHash.substring(0, 16);
+        return documentId + "-v" + version + "-c" + chunkIndex + "-" + hashPrefix;
     }
 
     private static long elapsedMillis(long startNanos) {

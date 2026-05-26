@@ -122,8 +122,10 @@ public class ConfirmationService {
     private ToolExecutionContext confirmedContext(ToolExecutionContext context) {
         ToolExecutionContext confirmedContext = new ToolExecutionContext(
                 context.getRequestId(),
+                context.getTenantId(),
                 context.getUserId(),
                 context.getDepartment(),
+                context.getDepartmentIds(),
                 context.getPermissionLevel(),
                 context.getRoles(),
                 context.getPermissions()

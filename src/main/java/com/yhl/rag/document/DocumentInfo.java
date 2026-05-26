@@ -1,6 +1,7 @@
 package com.yhl.rag.document;
 
 import java.time.Instant;
+import java.util.Set;
 
 public class DocumentInfo {
 
@@ -14,15 +15,21 @@ public class DocumentInfo {
 
     private Instant createdAt;
 
-    private DocumentStatus status = DocumentStatus.ACTIVE;
-
-    private int version = 1;
+    private String tenantId;
 
     private String ownerId;
 
-    private String department;
+    private String departmentId;
 
-    private DocumentVisibility visibility;
+    private DocumentVisibility visibility = DocumentVisibility.DEPARTMENT;
+
+    private Set<String> allowedUserIds = Set.of();
+
+    private Set<String> allowedRoleIds = Set.of();
+
+    private DocumentStatus status = DocumentStatus.READY;
+
+    private int currentVersion = 1;
 
     private int permissionLevel;
 
@@ -30,7 +37,7 @@ public class DocumentInfo {
     }
 
     public DocumentInfo(String id, String filename, String contentType, long size, Instant createdAt) {
-        this(id, filename, contentType, size, createdAt, DocumentStatus.ACTIVE, 1, null, null, DocumentVisibility.INTERNAL, 0);
+        this(id, filename, contentType, size, createdAt, DocumentStatus.READY, 1, null, null, DocumentVisibility.DEPARTMENT, 0);
     }
 
     public DocumentInfo(
@@ -42,8 +49,42 @@ public class DocumentInfo {
             DocumentStatus status,
             int version,
             String ownerId,
-            String department,
+            String departmentId,
             DocumentVisibility visibility,
+            int permissionLevel
+    ) {
+        this(
+                id,
+                filename,
+                contentType,
+                size,
+                createdAt,
+                "tenant-default",
+                ownerId,
+                departmentId,
+                visibility,
+                Set.of(),
+                Set.of(),
+                status,
+                version,
+                permissionLevel
+        );
+    }
+
+    public DocumentInfo(
+            String id,
+            String filename,
+            String contentType,
+            long size,
+            Instant createdAt,
+            String tenantId,
+            String ownerId,
+            String departmentId,
+            DocumentVisibility visibility,
+            Set<String> allowedUserIds,
+            Set<String> allowedRoleIds,
+            DocumentStatus status,
+            int currentVersion,
             int permissionLevel
     ) {
         this.id = id;
@@ -51,11 +92,14 @@ public class DocumentInfo {
         this.contentType = contentType;
         this.size = size;
         this.createdAt = createdAt;
-        this.status = status;
-        this.version = version;
+        this.tenantId = tenantId;
         this.ownerId = ownerId;
-        this.department = department;
+        this.departmentId = departmentId;
         this.visibility = visibility;
+        this.allowedUserIds = allowedUserIds == null ? Set.of() : Set.copyOf(allowedUserIds);
+        this.allowedRoleIds = allowedRoleIds == null ? Set.of() : Set.copyOf(allowedRoleIds);
+        this.status = status;
+        this.currentVersion = currentVersion;
         this.permissionLevel = permissionLevel;
     }
 
@@ -99,20 +143,12 @@ public class DocumentInfo {
         this.createdAt = createdAt;
     }
 
-    public DocumentStatus getStatus() {
-        return status;
+    public String getTenantId() {
+        return tenantId;
     }
 
-    public void setStatus(DocumentStatus status) {
-        this.status = status;
-    }
-
-    public int getVersion() {
-        return version;
-    }
-
-    public void setVersion(int version) {
-        this.version = version;
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
     }
 
     public String getOwnerId() {
@@ -123,12 +159,20 @@ public class DocumentInfo {
         this.ownerId = ownerId;
     }
 
+    public String getDepartmentId() {
+        return departmentId;
+    }
+
+    public void setDepartmentId(String departmentId) {
+        this.departmentId = departmentId;
+    }
+
     public String getDepartment() {
-        return department;
+        return departmentId;
     }
 
     public void setDepartment(String department) {
-        this.department = department;
+        this.departmentId = department;
     }
 
     public DocumentVisibility getVisibility() {
@@ -137,6 +181,46 @@ public class DocumentInfo {
 
     public void setVisibility(DocumentVisibility visibility) {
         this.visibility = visibility;
+    }
+
+    public Set<String> getAllowedUserIds() {
+        return allowedUserIds;
+    }
+
+    public void setAllowedUserIds(Set<String> allowedUserIds) {
+        this.allowedUserIds = allowedUserIds == null ? Set.of() : Set.copyOf(allowedUserIds);
+    }
+
+    public Set<String> getAllowedRoleIds() {
+        return allowedRoleIds;
+    }
+
+    public void setAllowedRoleIds(Set<String> allowedRoleIds) {
+        this.allowedRoleIds = allowedRoleIds == null ? Set.of() : Set.copyOf(allowedRoleIds);
+    }
+
+    public DocumentStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(DocumentStatus status) {
+        this.status = status;
+    }
+
+    public int getCurrentVersion() {
+        return currentVersion;
+    }
+
+    public void setCurrentVersion(int currentVersion) {
+        this.currentVersion = currentVersion;
+    }
+
+    public int getVersion() {
+        return currentVersion;
+    }
+
+    public void setVersion(int version) {
+        this.currentVersion = version;
     }
 
     public int getPermissionLevel() {

@@ -24,6 +24,8 @@ public class AgentLoopResponse {
 
     private String conversationId;
 
+    private AgentToolDebugInfo toolDebugInfo;
+
     public AgentLoopResponse() {
     }
 
@@ -32,6 +34,10 @@ public class AgentLoopResponse {
     }
 
     public AgentLoopResponse(String answer, boolean finished, String stopReason, List<AgentStep> steps, List<ToolResult> toolResults, boolean requiresConfirmation, String confirmationId, String requestId, String conversationId) {
+        this(answer, finished, stopReason, steps, toolResults, requiresConfirmation, confirmationId, requestId, conversationId, null);
+    }
+
+    public AgentLoopResponse(String answer, boolean finished, String stopReason, List<AgentStep> steps, List<ToolResult> toolResults, boolean requiresConfirmation, String confirmationId, String requestId, String conversationId, AgentToolDebugInfo toolDebugInfo) {
         this.answer = answer;
         this.finished = finished;
         this.stopReason = stopReason;
@@ -41,6 +47,7 @@ public class AgentLoopResponse {
         this.confirmationId = confirmationId;
         this.requestId = requestId;
         this.conversationId = conversationId;
+        this.toolDebugInfo = toolDebugInfo;
     }
 
     public String getAnswer() {
@@ -113,5 +120,13 @@ public class AgentLoopResponse {
 
     public void setConversationId(String conversationId) {
         this.conversationId = conversationId;
+    }
+
+    public AgentToolDebugInfo getToolDebugInfo() {
+        return toolDebugInfo;
+    }
+
+    public void setToolDebugInfo(AgentToolDebugInfo toolDebugInfo) {
+        this.toolDebugInfo = toolDebugInfo;
     }
 }

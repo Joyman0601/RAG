@@ -2,6 +2,9 @@ package com.yhl.rag.tool;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class SearchKnowledgeToolResult {
 
     private boolean answerable;
@@ -118,13 +121,22 @@ public class SearchKnowledgeToolResult {
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class Source {
 
         private String documentId;
 
         private String title;
 
-        private int chunkIndex;
+        private Integer chunkIndex;
+
+        private String documentName;
+
+        private String chunkId;
+
+        private Double score;
+
+        private String snippet;
 
         public Source() {
         }
@@ -133,6 +145,14 @@ public class SearchKnowledgeToolResult {
             this.documentId = documentId;
             this.title = title;
             this.chunkIndex = chunkIndex;
+        }
+
+        public Source(String documentId, String documentName, String chunkId, double score, String snippet) {
+            this.documentId = documentId;
+            this.documentName = documentName;
+            this.chunkId = chunkId;
+            this.score = score;
+            this.snippet = snippet;
         }
 
         public String getDocumentId() {
@@ -151,12 +171,44 @@ public class SearchKnowledgeToolResult {
             this.title = title;
         }
 
-        public int getChunkIndex() {
+        public Integer getChunkIndex() {
             return chunkIndex;
         }
 
-        public void setChunkIndex(int chunkIndex) {
+        public void setChunkIndex(Integer chunkIndex) {
             this.chunkIndex = chunkIndex;
+        }
+
+        public String getDocumentName() {
+            return documentName;
+        }
+
+        public void setDocumentName(String documentName) {
+            this.documentName = documentName;
+        }
+
+        public String getChunkId() {
+            return chunkId;
+        }
+
+        public void setChunkId(String chunkId) {
+            this.chunkId = chunkId;
+        }
+
+        public Double getScore() {
+            return score;
+        }
+
+        public void setScore(Double score) {
+            this.score = score;
+        }
+
+        public String getSnippet() {
+            return snippet;
+        }
+
+        public void setSnippet(String snippet) {
+            this.snippet = snippet;
         }
     }
 }

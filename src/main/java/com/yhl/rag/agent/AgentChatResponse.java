@@ -28,6 +28,8 @@ public class AgentChatResponse {
 
     private String stopReason;
 
+    private AgentToolDebugInfo toolDebugInfo;
+
     public AgentChatResponse() {
     }
 
@@ -161,5 +163,13 @@ public class AgentChatResponse {
 
     public void setStopReason(String stopReason) {
         this.stopReason = stopReason;
+    }
+
+    public AgentToolDebugInfo getToolDebugInfo() {
+        return toolDebugInfo;
+    }
+
+    public void setToolDebugInfo(AgentToolDebugInfo toolDebugInfo) {
+        this.toolDebugInfo = toolDebugInfo;
     }
 }

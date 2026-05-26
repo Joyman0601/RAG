@@ -13,6 +13,9 @@ public class RagAskResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private List<RagRetrievedChunk> retrievedChunks;
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private RagTokenUsage tokenUsage;
+
     public RagAskResponse() {
     }
 
@@ -25,6 +28,13 @@ public class RagAskResponse {
         this.answer = answer;
         this.sources = sources;
         this.retrievedChunks = retrievedChunks;
+    }
+
+    public RagAskResponse(String answer, List<RagSource> sources, List<RagRetrievedChunk> retrievedChunks, RagTokenUsage tokenUsage) {
+        this.answer = answer;
+        this.sources = sources;
+        this.retrievedChunks = retrievedChunks;
+        this.tokenUsage = tokenUsage;
     }
 
     public String getAnswer() {
@@ -49,5 +59,13 @@ public class RagAskResponse {
 
     public void setRetrievedChunks(List<RagRetrievedChunk> retrievedChunks) {
         this.retrievedChunks = retrievedChunks;
+    }
+
+    public RagTokenUsage getTokenUsage() {
+        return tokenUsage;
+    }
+
+    public void setTokenUsage(RagTokenUsage tokenUsage) {
+        this.tokenUsage = tokenUsage;
     }
 }

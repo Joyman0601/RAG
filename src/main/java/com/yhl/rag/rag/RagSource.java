@@ -19,6 +19,8 @@ public class RagSource {
 
     private String filename;
 
+    private String documentName;
+
     private String chunkId;
 
     private Integer chunkIndex;
@@ -37,9 +39,18 @@ public class RagSource {
         this.index = index;
         this.documentId = documentId;
         this.filename = filename;
+        this.documentName = filename;
         this.chunkId = chunkId;
         this.chunkIndex = chunkIndex;
         this.score = score;
+    }
+
+    public RagSource(String documentId, String documentName, String chunkId, double score, String snippet) {
+        this.documentId = documentId;
+        this.documentName = documentName;
+        this.chunkId = chunkId;
+        this.score = score;
+        this.snippet = snippet;
     }
 
     public String getId() {
@@ -96,6 +107,14 @@ public class RagSource {
 
     public void setFilename(String filename) {
         this.filename = filename;
+    }
+
+    public String getDocumentName() {
+        return documentName;
+    }
+
+    public void setDocumentName(String documentName) {
+        this.documentName = documentName;
     }
 
     public String getChunkId() {

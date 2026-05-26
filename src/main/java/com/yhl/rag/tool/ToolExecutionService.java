@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yhl.rag.agent.AgentErrorCode;
 import com.yhl.rag.agent.AgentSafetyPolicy;
+import com.yhl.rag.observability.MetricsService;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.slf4j.Logger;
@@ -29,17 +30,29 @@ public class ToolExecutionService {
     private final Validator validator;
 
     private final AgentSafetyPolicy safetyPolicy;
+    private final MetricsService metricsService;
 
     public ToolExecutionService(ToolRegistry toolRegistry, ObjectMapper objectMapper, Validator validator) {
-        this(toolRegistry, objectMapper, validator, new AgentSafetyPolicy());
+        this(toolRegistry, objectMapper, validator, new AgentSafetyPolicy(), new MetricsService());
+    }
+
+    public ToolExecutionService(ToolRegistry toolRegistry, ObjectMapper objectMapper, Validator validator, AgentSafetyPolicy safetyPolicy) {
+        this(toolRegistry, objectMapper, validator, safetyPolicy, new MetricsService());
     }
 
     @Autowired
-    public ToolExecutionService(ToolRegistry toolRegistry, ObjectMapper objectMapper, Validator validator, AgentSafetyPolicy safetyPolicy) {
+    public ToolExecutionService(
+            ToolRegistry toolRegistry,
+            ObjectMapper objectMapper,
+            Validator validator,
+            AgentSafetyPolicy safetyPolicy,
+            MetricsService metricsService
+    ) {
         this.toolRegistry = toolRegistry;
         this.objectMapper = objectMapper;
         this.validator = validator;
         this.safetyPolicy = safetyPolicy;
+        this.metricsService = metricsService;
     }
 
     public ToolResult execute(String toolName, JsonNode arguments, ToolExecutionContext context) {
@@ -54,17 +67,22 @@ public class ToolExecutionService {
             Object request = readAndValidateArguments(executor, arguments);
             Object result = executeTyped(executor, request, context);
             long elapsedMillis = elapsedMillis(startedAt);
-            log.info("tool_call requestId={} toolName={} success=true elapsedMs={}",
+            log.info("tool_call requestId={} toolName={} riskLevel={} success=true elapsedMs={} errorCode={} resultSummary={}",
                     requestId(context),
                     normalizedToolName,
-                    elapsedMillis);
+                    executor.getDefinition().getRiskLevel(),
+                    elapsedMillis,
+                    null,
+                    summarizeResult(result));
             return ToolResult.success(normalizedToolName, result, elapsedMillis);
         } catch (ToolException exception) {
             long elapsedMillis = elapsedMillis(startedAt);
             String errorCode = normalizeErrorCode(exception.getErrorType());
-            log.warn("tool_call requestId={} toolName={} success=false elapsedMs={} errorCode={} message={}",
+            metricsService.recordToolFailure();
+            log.warn("tool_call requestId={} toolName={} riskLevel={} success=false elapsedMs={} errorCode={} message={}",
                     requestId(context),
                     resolveToolName(normalizedToolName, toolName, exception),
+                    riskLevel(resolveToolName(normalizedToolName, toolName, exception)),
                     elapsedMillis,
                     errorCode,
                     exception.getMessage(),
@@ -77,9 +95,11 @@ public class ToolExecutionService {
             );
         } catch (RuntimeException exception) {
             long elapsedMillis = elapsedMillis(startedAt);
-            log.error("tool_call requestId={} toolName={} success=false elapsedMs={} errorCode={}",
+            metricsService.recordToolFailure();
+            log.error("tool_call requestId={} toolName={} riskLevel={} success=false elapsedMs={} errorCode={}",
                     requestId(context),
                     normalizedToolName == null ? toolName : normalizedToolName,
+                    riskLevel(normalizedToolName == null ? toolName : normalizedToolName),
                     elapsedMillis,
                     AgentErrorCode.TOOL_EXECUTION_FAILED,
                     exception);
@@ -113,7 +133,7 @@ public class ToolExecutionService {
             throw new ToolException(AgentErrorCode.VALIDATION_ERROR.name(), "arguments must be a JSON object", executor.getName());
         }
 
-        String forbiddenArgument = findForbiddenArgument(arguments);
+        String forbiddenArgument = findForbiddenArgument(executor.getName(), arguments);
         if (forbiddenArgument != null) {
             throw new ToolException(AgentErrorCode.PERMISSION_DENIED.name(), forbiddenArgument + " is not allowed in tool arguments", executor.getName());
         }
@@ -211,12 +231,39 @@ public class ToolExecutionService {
         return errorType;
     }
 
-    private String findForbiddenArgument(JsonNode arguments) {
-        for (String forbiddenKey : Set.of("userId", "tenantId", "topK", "scoreThreshold")) {
+    private String findForbiddenArgument(String toolName, JsonNode arguments) {
+        Set<String> forbiddenKeys = "search_knowledge_base".equals(toolName)
+                ? Set.of("userId", "tenantId", "role", "roleId", "roleIds", "departmentId", "departmentIds", "visibility", "scoreThreshold")
+                : Set.of("userId", "tenantId", "topK", "scoreThreshold", "role", "roleId", "roleIds", "departmentId", "departmentIds", "visibility");
+        for (String forbiddenKey : forbiddenKeys) {
             if (arguments.has(forbiddenKey)) {
                 return forbiddenKey;
             }
         }
         return null;
+    }
+
+    private RiskLevel riskLevel(String toolName) {
+        return toolRegistry.findDefinition(toolName)
+                .map(ToolDefinition::getRiskLevel)
+                .orElse(null);
+    }
+
+    private String summarizeResult(Object result) {
+        if (result == null) {
+            return "null";
+        }
+        if (result instanceof QueryOrderToolResult order) {
+            return "orderId=" + order.getOrderId()
+                    + ",status=" + order.getStatus()
+                    + ",amount=" + order.getAmount();
+        }
+        if (result instanceof SearchKnowledgeToolResult knowledge) {
+            return "answerable=" + knowledge.isAnswerable()
+                    + ",retrievedCount=" + knowledge.getRetrievedCount()
+                    + ",sourceCount=" + (knowledge.getSources() == null ? 0 : knowledge.getSources().size());
+        }
+        String typeName = result.getClass().getSimpleName();
+        return "type=" + typeName + ",stringLength=" + String.valueOf(result).length();
     }
 }

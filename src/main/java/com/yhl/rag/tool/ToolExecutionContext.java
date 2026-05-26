@@ -8,9 +8,13 @@ public class ToolExecutionContext {
 
     private String requestId;
 
+    private String tenantId = "tenant-default";
+
     private String userId;
 
     private String department;
+
+    private Set<String> departmentIds = Set.of();
 
     private int permissionLevel;
 
@@ -38,6 +42,7 @@ public class ToolExecutionContext {
         this.requestId = requestId;
         this.userId = userId;
         this.department = department;
+        this.departmentIds = department == null ? Set.of() : Set.of(department);
         this.permissionLevel = permissionLevel;
         this.roles = roles == null ? Set.of() : Set.copyOf(roles);
         this.permissions = permissions == null ? Set.of() : Set.copyOf(permissions);
@@ -46,10 +51,50 @@ public class ToolExecutionContext {
     public static ToolExecutionContext from(String requestId, CurrentUser currentUser) {
         return new ToolExecutionContext(
                 requestId,
+                currentUser.getTenantId(),
                 currentUser.getUserId(),
                 currentUser.getDepartment(),
-                currentUser.getPermissionLevel()
+                currentUser.getDepartmentIds(),
+                currentUser.getPermissionLevel(),
+                currentUser.getRoleIds(),
+                Set.of("order:query", "order:cancel", "knowledge:search")
         );
+    }
+
+    public ToolExecutionContext(
+            String requestId,
+            String tenantId,
+            String userId,
+            String department,
+            Set<String> departmentIds,
+            int permissionLevel,
+            Set<String> roles,
+            Set<String> permissions
+    ) {
+        this.requestId = requestId;
+        this.tenantId = tenantId;
+        this.userId = userId;
+        this.department = department;
+        this.departmentIds = departmentIds == null ? Set.of() : Set.copyOf(departmentIds);
+        this.permissionLevel = permissionLevel;
+        this.roles = roles == null ? Set.of() : Set.copyOf(roles);
+        this.permissions = permissions == null ? Set.of() : Set.copyOf(permissions);
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    public Set<String> getDepartmentIds() {
+        return departmentIds;
+    }
+
+    public void setDepartmentIds(Set<String> departmentIds) {
+        this.departmentIds = departmentIds == null ? Set.of() : Set.copyOf(departmentIds);
     }
 
     public String getRequestId() {

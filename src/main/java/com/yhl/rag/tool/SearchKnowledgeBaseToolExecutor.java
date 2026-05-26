@@ -61,11 +61,14 @@ public class SearchKnowledgeBaseToolExecutor implements ToolExecutor<SearchKnowl
     @Override
     public Object execute(SearchKnowledgeToolRequest request, ToolExecutionContext context) {
         CurrentUser currentUser = new CurrentUser(
+                context.getTenantId(),
                 context.getUserId(),
                 context.getDepartment(),
+                context.getDepartmentIds(),
+                context.getRoles(),
                 context.getPermissionLevel()
         );
-        RagSearchOutcome outcome = ragSearchService.searchWithMetrics(request.getQuery(), currentUser, false);
+        RagSearchOutcome outcome = ragSearchService.searchWithMetrics(request.getQuery(), currentUser, false, request.getTopK());
         List<RagSearchResult> results = outcome.results();
         List<SearchKnowledgeToolResult.Context> contexts = results.stream()
                 .map(this::toContext)
@@ -81,7 +84,7 @@ public class SearchKnowledgeBaseToolExecutor implements ToolExecutor<SearchKnowl
                 context.getRequestId(),
                 context.getUserId(),
                 results.size(),
-                ragProperties.getSearch().getTopK(),
+                request.getTopK() == null ? ragProperties.getSearch().getTopK() : Math.min(request.getTopK(), ragProperties.getSearch().getTopK()),
                 ragProperties.getSearch().getScoreThreshold(),
                 sourceIds);
 
@@ -102,14 +105,16 @@ public class SearchKnowledgeBaseToolExecutor implements ToolExecutor<SearchKnowl
         return new SearchKnowledgeToolResult.Source(
                 result.getDocumentId(),
                 result.getFilename(),
-                result.getChunkIndex()
+                result.getChunkId(),
+                result.getScore(),
+                limitContent(result.getContent())
         );
     }
 
     private List<SearchKnowledgeToolResult.Source> toSources(List<RagSearchResult> results) {
         Map<String, SearchKnowledgeToolResult.Source> sources = new LinkedHashMap<>();
         for (RagSearchResult result : results) {
-            String key = result.getDocumentId() + ":" + result.getChunkIndex();
+            String key = result.getDocumentId() + ":" + result.getChunkId();
             sources.putIfAbsent(key, toSource(result));
         }
         return List.copyOf(sources.values());
@@ -130,9 +135,15 @@ public class SearchKnowledgeBaseToolExecutor implements ToolExecutor<SearchKnowl
         com.fasterxml.jackson.databind.node.ObjectNode properties = objectMapper.createObjectNode();
         com.fasterxml.jackson.databind.node.ObjectNode query = objectMapper.createObjectNode();
         query.put("type", "string");
-        query.put("description", "Knowledge base search query. Do not include userId, tenantId, topK, or scoreThreshold.");
+        query.put("description", "Knowledge base search query. Do not include tenantId, userId, role, departmentId, visibility, or scoreThreshold.");
         query.put("maxLength", 500);
         properties.set("query", query);
+        com.fasterxml.jackson.databind.node.ObjectNode topK = objectMapper.createObjectNode();
+        topK.put("type", "integer");
+        topK.put("description", "Optional maximum retrieval count. Backend still applies configured upper bounds and permission filters.");
+        topK.put("minimum", 1);
+        topK.put("maximum", 10);
+        properties.set("topK", topK);
 
         schema.set("properties", properties);
         schema.putArray("required").add("query");

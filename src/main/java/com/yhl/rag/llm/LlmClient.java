@@ -18,6 +18,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yhl.rag.observability.MetricsService;
+import com.yhl.rag.observability.RequestContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -39,11 +41,18 @@ public class LlmClient {
     private final HttpClient httpClient;
     private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
+    private final MetricsService metricsService;
 
-    public LlmClient(RestClient.Builder restClientBuilder, LlmProperties llmProperties, ObjectMapper objectMapper) {
+    public LlmClient(
+            RestClient.Builder restClientBuilder,
+            LlmProperties llmProperties,
+            ObjectMapper objectMapper,
+            MetricsService metricsService
+    ) {
         this.llmProperties = llmProperties;
         this.httpClient = buildHttpClient(llmProperties);
         this.objectMapper = objectMapper;
+        this.metricsService = metricsService;
         this.restClient = restClientBuilder
                 .baseUrl(normalizeBaseUrl(llmProperties.getBaseUrl()))
                 .requestFactory(buildRequestFactory(llmProperties, httpClient))
@@ -111,12 +120,15 @@ public class LlmClient {
             throw exception;
         }
 
-        logSuccess(startNanos, inputChars, charLength(answer));
+        Integer promptTokens = promptTokens(response);
+        Integer completionTokens = completionTokens(response);
+        Integer totalTokens = totalTokens(response);
+        logSuccess(startNanos, inputChars, charLength(answer), promptTokens, completionTokens, totalTokens);
         return new LlmGenerationResult(
                 answer,
-                promptTokens(response),
-                completionTokens(response),
-                totalTokens(response)
+                promptTokens,
+                completionTokens,
+                totalTokens
         );
     }
 
@@ -180,7 +192,7 @@ public class LlmClient {
                 throw new LlmException(LlmErrorType.EMPTY_OUTPUT, "模型接口流式响应为空");
             }
 
-            logSuccess(startNanos, inputChars, outputChars.get());
+            logSuccess(startNanos, inputChars, outputChars.get(), null, null, null);
             emitter.complete();
         } catch (LlmException exception) {
             logFailure(startNanos, inputChars, outputChars.get(), exception.getErrorType());
@@ -432,17 +444,34 @@ public class LlmClient {
         return text == null ? 0 : text.length();
     }
 
-    private void logSuccess(long startNanos, int inputChars, int outputChars) {
-        log.info("llm_call model={} durationMs={} inputChars={} outputChars={} success=true",
+    private void logSuccess(
+            long startNanos,
+            int inputChars,
+            int outputChars,
+            Integer promptTokens,
+            Integer completionTokens,
+            Integer totalTokens
+    ) {
+        log.info("llm_call requestId={} model={} promptTokens={} completionTokens={} totalTokens={} latencyMs={} inputChars={} outputChars={} success=true errorType={}",
+                RequestContext.requestId(),
                 llmProperties.getModel(),
+                promptTokens,
+                completionTokens,
+                totalTokens,
                 elapsedMillis(startNanos),
                 inputChars,
-                outputChars);
+                outputChars,
+                null);
     }
 
     private void logFailure(long startNanos, int inputChars, int outputChars, LlmErrorType errorType) {
-        log.warn("llm_call model={} durationMs={} inputChars={} outputChars={} success=false errorType={}",
+        metricsService.recordLlmCall(0, false);
+        log.warn("llm_call requestId={} model={} promptTokens={} completionTokens={} totalTokens={} latencyMs={} inputChars={} outputChars={} success=false errorType={}",
+                RequestContext.requestId(),
                 llmProperties.getModel(),
+                null,
+                null,
+                null,
                 elapsedMillis(startNanos),
                 inputChars,
                 outputChars,
