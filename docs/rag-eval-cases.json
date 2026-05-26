@@ -1,0 +1,32 @@
+[
+  {
+    "caseId": "leave-sick-materials",
+    "question": "病假需要提交什么材料？",
+    "expectedAnswer": "病假 材料",
+    "expectedSourceChunkIds": [],
+    "expectedSourceDocumentIds": [],
+    "tenantId": "default",
+    "userId": "user_001",
+    "tags": ["leave", "policy"]
+  },
+  {
+    "caseId": "leave-annual-days",
+    "question": "年假有多少天？",
+    "expectedAnswer": "年假 天",
+    "expectedSourceChunkIds": [],
+    "expectedSourceDocumentIds": [],
+    "tenantId": "default",
+    "userId": "user_001",
+    "tags": ["leave", "policy"]
+  },
+  {
+    "caseId": "reimbursement-invoice",
+    "question": "报销需要发票吗？",
+    "expectedAnswer": "报销 发票",
+    "expectedSourceChunkIds": [],
+    "expectedSourceDocumentIds": [],
+    "tenantId": "default",
+    "userId": "user_001",
+    "tags": ["reimbursement", "policy"]
+  }
+]
