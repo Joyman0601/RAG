@@ -78,14 +78,16 @@ class ObservabilityTest {
                 1
         ));
         try {
+            RagProperties ragProps = new RagProperties();
             RagAskService askService = new RagAskService(
                     searchService,
                     llmClient,
-                    new RagProperties(),
+                    ragProps,
                     new LlmProperties(),
                     costService(new MetricsService()),
                     new MockCurrentUserProvider(),
-                    new MetricsService()
+                    new MetricsService(),
+                    new com.yhl.rag.rag.QueryRewriterService(llmClient, ragProps)
             );
 
             askService.ask("问题");

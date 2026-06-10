@@ -1,0 +1,22 @@
+{
+  "vector": {
+    "faithfulness": 0.854,
+    "answer_relevancy": 0.3703,
+    "llm_context_precision_without_reference": 0.6528
+  },
+  "hybrid": {
+    "faithfulness": 0.9484,
+    "answer_relevancy": 0.5261,
+    "llm_context_precision_without_reference": 0.8431
+  },
+  "hybrid_rerank": {
+    "faithfulness": 0.9171,
+    "answer_relevancy": 0.4429,
+    "llm_context_precision_without_reference": 0.8889
+  },
+  "vector_rewrite": {
+    "faithfulness": 0.8807,
+    "answer_relevancy": 0.3618,
+    "llm_context_precision_without_reference": 0.8111
+  }
+}

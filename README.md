@@ -12,12 +12,18 @@ Java Spring Boot project for learning LLM, RAG, and Agent application developmen
 - chunk 切分：按配置的 chunk size 和 overlap 将文档切成可检索片段。
 - embedding：上传文档后为每个 chunk 调用 embedding API 并暂存在内存中。
 - 向量检索：用户问题先生成问题向量，再用 cosine similarity 检索相关 chunk。
+- 混合检索（Hybrid）：向量检索与 BM25 关键词检索并行召回，再用 RRF（倒数排名融合）合并，补足纯向量在编号、专名、缩写上的短板。
+- Rerank 精排：混合召回后可选接入 bge-reranker 交叉编码器对候选重排，取 top_k 喂给 LLM；rerank 失败自动降级回 RRF 融合顺序，不中断链路。
+- Query 改写：可选用 LLM 把口语化问题改写成检索友好 query（仅用于检索，作答仍用原问题），失败自动降级回原 query。
 - 基于上下文回答：将召回 chunk 构造成编号 context，再调用 LLM 生成答案。
 - sources 引用来源：后端根据实际进入 context 的 chunk 生成 sources，不依赖模型编造。
 - 无答案兜底：无检索结果或无可用上下文时返回“根据现有资料无法回答。”
 - 文档更新和删除：更新时废弃旧 chunk 和旧 embedding，删除时标记 DELETED 并移除向量。
 - 基础权限过滤：检索前按 visibility、ownerId、department 做第一版 metadata filter。
 - debug / eval / 成本统计：支持召回调试、固定评估集、embedding/search/chat 耗时和长度统计。
+- RAGAS 评估体系：Java 侧导出评估 JSON，Python 旁路用官方 ragas 出分（faithfulness / answer relevancy / context precision / recall），量化对比不同检索方案。
+- LLM 可观测性：可选接入 Langfuse，在 LLM 唯一出入口按 requestId 串成 trace，记录完整 prompt/输出与 token 成本。
+- 多端点适配：LLM 客户端支持 `responses`（OpenAI Responses API）与 `chat`（/v1/chat/completions）两种调用风格切换。
 
 ## RAG 离线入库流程
 
@@ -77,6 +83,32 @@ Java Spring Boot project for learning LLM, RAG, and Agent application developmen
 - 为什么不能只依赖 prompt：prompt 只能约束模型回答方式，不能保证资料权限、版本正确性和引用真实性；权限过滤、版本过滤、sources 生成必须由后端控制。
 - 文档更新为什么不能只追加 chunk：旧 chunk 如果仍可检索，可能和新制度一起进入上下文，导致过期或冲突答案。更新时必须废弃旧版本 chunk 和 embedding。
 - 如何控制成本和上下文长度：通过 `top_k`、`chunk size`、`context max chars`、`max output tokens` 控制召回数量、上下文长度和输出长度，避免无脑塞入大量 chunk。
+
+## 检索质量升级：混合检索 + Rerank
+
+纯向量检索擅长理解语义，但在精确关键词、编号、专名、缩写上容易翻车——例如订单号 `A12345` 可能召回语义相近但编号错误的 `A12346`。为此引入两段式检索：
+
+- 召回阶段：向量检索（稠密，懂语义）与 BM25 关键词检索（稀疏，懂字面）各召回 `recall-top-k` 条候选，用 **RRF（倒数排名融合）** 合并——只看排名不看分数量纲，文档排第 r 名得 `1/(k+r)` 分，两路相加重排。
+- 精排阶段：可选接入 **bge-reranker 交叉编码器**，把 query 与候选拼在一起逐词交互打分，对融合后的候选重排再取 top_k。Bi-Encoder（双塔）适合快速召回，Cross-Encoder 精度高但慢，所以只用它精排少量候选，而不是全库召回。
+
+通过 `rag.search.mode` 在 `vector` / `hybrid` / `hybrid_rerank` 之间切换，默认保持纯向量行为。rerank 调用失败时自动降级回 RRF 融合顺序，不报错、不中断链路（`debugInfo` 标记为 `rrf`）。
+
+## Query 改写
+
+用户问题常常口语化、有省略或指代。`rag.query-rewrite.enabled` 打开后，会先让 LLM 把问题改写成检索友好的 query，再用改写后的 query 去检索；**作答 prompt 仍使用原始问题**，改写只优化检索不改变回答语境。LLM 调用失败或返回空时自动降级回原 query。注意：在已经规范化的 FAQ 语料上改写未必有增益，价值主要体现在口语化、省略多的真实用户问题上——是否开启应以评估数据为准。
+
+## RAGAS 评估体系
+
+没有评估的 RAG 优化等于玄学。本项目用 Java 侧导出评估数据、Python 旁路（`eval/`，钉 ragas 版本的独立 venv）跑官方 ragas 出分的方式，量化对比 `vector` / `hybrid` / `hybrid_rerank` 三种检索方案：
+
+- 检索指标：Hit@K、relevance@K、检索延迟 p50。
+- 生成指标（LLM-as-Judge）：faithfulness（忠实度）、answer relevancy（切题度）、context precision（相关上下文排序）。
+
+关键认知：当数据集召回已饱和（Hit@K 都接近 100%）时，混合检索/重排的增量体现在 context precision 与排序质量，而非召回率；rerank 会带来明显的检索延迟代价，需按场景权衡是否启用。这正是做评估的价值——用数据判断技术是否真正有用，而不是盲目堆叠。
+
+## LLM 可观测性（Langfuse）
+
+结构化日志能告诉你错误发生在链路哪一步，但复现不了模型当时看到的完整上下文，也算不清成本分布。`langfuse.enabled` 打开后，在 LLM 唯一出入口（`LlmClient.generateWithUsage`）按 `requestId` 埋点串成 trace，补齐两点：完整 prompt + 模型原始输出可视化、按 trace/请求类型的 token 成本 dashboard。埋点是 fire-and-forget 异步上报，失败仅 `log.warn` 吞掉，不影响主链路。本地可用 `docker-compose.langfuse.yml` 起一套 Langfuse。
 
 ## Tool Calling 的后端职责
 
@@ -138,6 +170,21 @@ LLM_EMBEDDING_TIMEOUT=30
 
 `LLM_EMBEDDING_BASE_URL` must point to a provider that supports `POST /v1/embeddings`. The text relay `LLM_BASE_URL` may not support embeddings.
 
+API style. Use `responses` for the Responses API relay (default) or `chat` to call `/v1/chat/completions` compatible providers:
+
+```bash
+LLM_API_STYLE=responses
+```
+
+Rerank (cross-encoder) for `hybrid_rerank` mode, must support `POST /v1/rerank`:
+
+```bash
+LLM_RERANK_BASE_URL=https://api.siliconflow.cn/v1
+LLM_RERANK_API_KEY=your-rerank-api-key
+LLM_RERANK_MODEL=BAAI/bge-reranker-v2-m3
+LLM_RERANK_TIMEOUT=30
+```
+
 Optional proxy:
 
 ```bash
@@ -145,15 +192,28 @@ LLM_PROXY_HOST=127.0.0.1
 LLM_PROXY_PORT=7890
 ```
 
-RAG chunking:
+RAG chunking and retrieval:
 
 ```bash
 RAG_CHUNK_SIZE=600
 RAG_CHUNK_OVERLAP=100
 RAG_SEARCH_TOP_K=3
 RAG_SEARCH_SCORE_THRESHOLD=0.3
+RAG_SEARCH_MODE=vector            # vector | hybrid | hybrid_rerank
+RAG_SEARCH_RECALL_TOP_K=50        # 召回阶段每路各取的候选数，融合后裁剪到 top_k
+RAG_SEARCH_RRF_K=60               # RRF 融合常数 k
 RAG_CONTEXT_MAX_CHARS=3000
+RAG_QUERY_REWRITE_ENABLED=false   # 检索前是否用 LLM 改写 query
 RAG_DEBUG_ENABLED=false
+```
+
+LLM observability (Langfuse, optional):
+
+```bash
+LANGFUSE_ENABLED=false
+LANGFUSE_HOST=http://localhost:3000
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
 ```
 
 ## Chat Example
@@ -268,7 +328,7 @@ The search endpoint embeds the question, compares it with in-memory chunk vector
 
 如果正确 chunk 被召回但没有进入问答上下文，可以观察 score 分布，并降低 `RAG_SEARCH_SCORE_THRESHOLD`。调试时可以调用 `/api/rag/search?includeBelowThreshold=true`，让接口返回 top_k 候选中低于 threshold 的结果，并通过 `included=false` 判断哪些结果被过滤。
 
-如果向量分数整体偏低或相近，说明仅靠向量检索可能不稳定。后续可以加入关键词检索做混合召回，或在向量召回后增加 rerank 模型重新排序。当前项目仍保持内存版向量检索，不急于接真实向量数据库。
+如果向量分数整体偏低或相近，说明仅靠向量检索可能不稳定。本项目已支持通过 `RAG_SEARCH_MODE` 切换检索策略：`vector`（纯向量，默认）、`hybrid`（向量 + BM25 RRF 融合）、`hybrid_rerank`（融合后再 bge-reranker 精排）。混合检索补足纯向量在精确关键词、编号、专名上的短板，rerank 进一步提升相关上下文的排序质量。当前项目仍保持内存版检索，不急于接真实向量数据库。
 
 Ask with retrieved context:
 

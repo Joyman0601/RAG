@@ -16,8 +16,13 @@ rag:
   search:
     top-k: ${RAG_SEARCH_TOP_K:3}
     score-threshold: ${RAG_SEARCH_SCORE_THRESHOLD:0.3}
+    mode: ${RAG_SEARCH_MODE:vector}
+    recall-top-k: ${RAG_SEARCH_RECALL_TOP_K:50}
+    rrf-k: ${RAG_SEARCH_RRF_K:60}
   context:
     max-chars: ${RAG_CONTEXT_MAX_CHARS:3000}
+  query-rewrite:
+    enabled: ${RAG_QUERY_REWRITE_ENABLED:false}
 
 llm:
   api-key: ${LLM_API_KEY:}
@@ -31,8 +36,19 @@ llm:
   embedding-api-key: ${LLM_EMBEDDING_API_KEY:}
   embedding-model: ${LLM_EMBEDDING_MODEL:text-embedding-3-small}
   embedding-timeout: ${LLM_EMBEDDING_TIMEOUT:30}
+  rerank-base-url: ${LLM_RERANK_BASE_URL:https://api.siliconflow.cn/v1}
+  rerank-api-key: ${LLM_RERANK_API_KEY:}
+  rerank-model: ${LLM_RERANK_MODEL:BAAI/bge-reranker-v2-m3}
+  rerank-timeout: ${LLM_RERANK_TIMEOUT:30}
   proxy-host: ${LLM_PROXY_HOST:}
   proxy-port: ${LLM_PROXY_PORT:0}
+  api-style: ${LLM_API_STYLE:responses}
+
+langfuse:
+  enabled: ${LANGFUSE_ENABLED:false}
+  host: ${LANGFUSE_HOST:http://localhost:3000}
+  public-key: ${LANGFUSE_PUBLIC_KEY:}
+  secret-key: ${LANGFUSE_SECRET_KEY:}
 
 agent:
   tool-rollout:

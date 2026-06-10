@@ -11,17 +11,21 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yhl.rag.observability.LangfuseTracer;
 import com.yhl.rag.observability.MetricsService;
 import com.yhl.rag.observability.RequestContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -42,6 +46,33 @@ public class LlmClient {
     private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
     private final MetricsService metricsService;
+    private final LangfuseTracer langfuseTracer;
+    private final RestClient chatRestClient;
+
+    @Autowired
+    public LlmClient(
+            RestClient.Builder restClientBuilder,
+            LlmProperties llmProperties,
+            ObjectMapper objectMapper,
+            MetricsService metricsService,
+            LangfuseTracer langfuseTracer
+    ) {
+        this.llmProperties = llmProperties;
+        this.httpClient = buildHttpClient(llmProperties);
+        this.objectMapper = objectMapper;
+        this.metricsService = metricsService;
+        this.langfuseTracer = langfuseTracer;
+        this.restClient = restClientBuilder
+                .baseUrl(normalizeBaseUrl(llmProperties.getBaseUrl()))
+                .requestFactory(buildRequestFactory(llmProperties, httpClient))
+                .build();
+        // chat/completions 路径用 SimpleClientHttpRequestFactory（HttpURLConnection），
+        // 避免 JDK HttpClient 的 HTTP/2 升级握手被部分服务端 reset 的问题。
+        this.chatRestClient = RestClient.builder()
+                .baseUrl(normalizeBaseUrl(llmProperties.getBaseUrl()))
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory())
+                .build();
+    }
 
     public LlmClient(
             RestClient.Builder restClientBuilder,
@@ -49,14 +80,7 @@ public class LlmClient {
             ObjectMapper objectMapper,
             MetricsService metricsService
     ) {
-        this.llmProperties = llmProperties;
-        this.httpClient = buildHttpClient(llmProperties);
-        this.objectMapper = objectMapper;
-        this.metricsService = metricsService;
-        this.restClient = restClientBuilder
-                .baseUrl(normalizeBaseUrl(llmProperties.getBaseUrl()))
-                .requestFactory(buildRequestFactory(llmProperties, httpClient))
-                .build();
+        this(restClientBuilder, llmProperties, objectMapper, metricsService, null);
     }
 
     public String generate(String instructions, List<LlmMessage> input) {
@@ -77,53 +101,125 @@ public class LlmClient {
             );
         }
 
-        ResponsesRequest request = new ResponsesRequest(
-                llmProperties.getModel(),
-                instructions,
-                input,
-                llmProperties.getTemperature(),
-                llmProperties.getMaxOutputTokens()
-        );
-
-        ResponsesResponse response;
-        try {
-            response = restClient.post()
-                    .uri("/responses")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .accept(MediaType.APPLICATION_JSON)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + llmProperties.getApiKey())
-                    .body(request)
-                    .retrieve()
-                    .onStatus(HttpStatusCode::isError, (httpRequest, httpResponse) -> {
-                        String responseBody = new String(httpResponse.getBody().readAllBytes(), StandardCharsets.UTF_8);
-                        throw new LlmException(
-                                LlmErrorType.HTTP_ERROR,
-                                "模型接口返回非 2xx，HTTP " + httpResponse.getStatusCode().value()
-                                        + "，响应内容：" + responseBody
-                        );
-                    })
-                    .body(ResponsesResponse.class);
-        } catch (LlmException exception) {
-            logFailure(startNanos, inputChars, 0, exception.getErrorType());
-            throw exception;
-        } catch (RestClientException exception) {
-            LlmErrorType errorType = isTimeout(exception) ? LlmErrorType.TIMEOUT : LlmErrorType.CLIENT_ERROR;
-            logFailure(startNanos, inputChars, 0, errorType);
-            throw new LlmException(errorType, buildClientErrorMessage(errorType, exception), exception);
-        }
+        boolean chatStyle = "chat".equalsIgnoreCase(llmProperties.getApiStyle());
 
         String answer;
-        try {
-            answer = extractAnswer(response);
-        } catch (LlmException exception) {
-            logFailure(startNanos, inputChars, 0, exception.getErrorType());
-            throw exception;
-        }
+        Integer promptTokens;
+        Integer completionTokens;
+        Integer totalTokens;
 
-        Integer promptTokens = promptTokens(response);
-        Integer completionTokens = completionTokens(response);
-        Integer totalTokens = totalTokens(response);
+        if (chatStyle) {
+            // chat/completions 路径（兼容硅基流动等标准 OpenAI 端点）
+            // system prompt 用 instructions，user messages 直接传入
+            List<Map<String, String>> messages = new ArrayList<>();
+            if (StringUtils.hasText(instructions)) {
+                messages.add(Map.of("role", "system", "content", instructions));
+            }
+            for (LlmMessage m : input) {
+                messages.add(Map.of("role", m.role(), "content", m.content()));
+            }
+            ChatRequest chatRequest = new ChatRequest(
+                    llmProperties.getModel(),
+                    messages,
+                    llmProperties.getTemperature(),
+                    llmProperties.getMaxOutputTokens()
+            );
+
+            ChatResponse chatResponse;
+            try {
+                chatResponse = chatRestClient.post()
+                        .uri("/chat/completions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + llmProperties.getApiKey())
+                        .body(chatRequest)
+                        .retrieve()
+                        .onStatus(HttpStatusCode::isError, (httpRequest, httpResponse) -> {
+                            String responseBody = new String(httpResponse.getBody().readAllBytes(), StandardCharsets.UTF_8);
+                            throw new LlmException(
+                                    LlmErrorType.HTTP_ERROR,
+                                    "模型接口返回非 2xx，HTTP " + httpResponse.getStatusCode().value()
+                                            + "，响应内容：" + responseBody
+                            );
+                        })
+                        .body(ChatResponse.class);
+            } catch (LlmException exception) {
+                logFailure(startNanos, inputChars, 0, exception.getErrorType());
+                throw exception;
+            } catch (RestClientException exception) {
+                LlmErrorType errorType = isTimeout(exception) ? LlmErrorType.TIMEOUT : LlmErrorType.CLIENT_ERROR;
+                logFailure(startNanos, inputChars, 0, errorType);
+                throw new LlmException(errorType, buildClientErrorMessage(errorType, exception), exception);
+            }
+
+            try {
+                answer = extractChatAnswer(chatResponse);
+            } catch (LlmException exception) {
+                logFailure(startNanos, inputChars, 0, exception.getErrorType());
+                throw exception;
+            }
+            promptTokens = chatResponse.usage() != null ? chatResponse.usage().promptTokens() : null;
+            completionTokens = chatResponse.usage() != null ? chatResponse.usage().completionTokens() : null;
+            totalTokens = chatResponse.usage() != null ? chatResponse.usage().totalTokens() : null;
+
+        } else {
+            // responses 路径（OpenAI Responses API，默认）
+            ResponsesRequest request = new ResponsesRequest(
+                    llmProperties.getModel(),
+                    instructions,
+                    input,
+                    llmProperties.getTemperature(),
+                    llmProperties.getMaxOutputTokens()
+            );
+
+            ResponsesResponse response;
+            try {
+                response = restClient.post()
+                        .uri("/responses")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + llmProperties.getApiKey())
+                        .body(request)
+                        .retrieve()
+                        .onStatus(HttpStatusCode::isError, (httpRequest, httpResponse) -> {
+                            String responseBody = new String(httpResponse.getBody().readAllBytes(), StandardCharsets.UTF_8);
+                            throw new LlmException(
+                                    LlmErrorType.HTTP_ERROR,
+                                    "模型接口返回非 2xx，HTTP " + httpResponse.getStatusCode().value()
+                                            + "，响应内容：" + responseBody
+                            );
+                        })
+                        .body(ResponsesResponse.class);
+            } catch (LlmException exception) {
+                logFailure(startNanos, inputChars, 0, exception.getErrorType());
+                throw exception;
+            } catch (RestClientException exception) {
+                LlmErrorType errorType = isTimeout(exception) ? LlmErrorType.TIMEOUT : LlmErrorType.CLIENT_ERROR;
+                logFailure(startNanos, inputChars, 0, errorType);
+                throw new LlmException(errorType, buildClientErrorMessage(errorType, exception), exception);
+            }
+
+            try {
+                answer = extractAnswer(response);
+            } catch (LlmException exception) {
+                logFailure(startNanos, inputChars, 0, exception.getErrorType());
+                throw exception;
+            }
+            promptTokens = promptTokens(response);
+            completionTokens = completionTokens(response);
+            totalTokens = totalTokens(response);
+        }
+        long latencyMs = java.time.Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
         logSuccess(startNanos, inputChars, charLength(answer), promptTokens, completionTokens, totalTokens);
+        if (langfuseTracer != null) {
+            String traceId = RequestContext.requestIdOr(null);
+            String inputSummary = instructions + "\n" + input.stream()
+                    .map(m -> "[" + m.role() + "] " + m.content())
+                    .reduce("", (a, b) -> a + "\n" + b);
+            langfuseTracer.recordGeneration(traceId, "llm_call",
+                    llmProperties.getModel(), inputSummary, answer,
+                    promptTokens, completionTokens, latencyMs);
+        }
         return new LlmGenerationResult(
                 answer,
                 promptTokens,
@@ -525,5 +621,45 @@ public class LlmClient {
             @JsonProperty("completion_tokens") Integer completionTokens,
             @JsonProperty("total_tokens") Integer totalTokens
     ) {
+    }
+
+    // ---- chat/completions records ------------------------------------------------
+
+    private record ChatRequest(
+            String model,
+            List<Map<String, String>> messages,
+            double temperature,
+            @JsonProperty("max_tokens") int maxTokens
+    ) {
+    }
+
+    private record ChatResponse(
+            List<ChatChoice> choices,
+            ChatUsage usage
+    ) {
+    }
+
+    private record ChatChoice(ChatMessage message) {
+    }
+
+    private record ChatMessage(String role, String content) {
+    }
+
+    private record ChatUsage(
+            @JsonProperty("prompt_tokens") Integer promptTokens,
+            @JsonProperty("completion_tokens") Integer completionTokens,
+            @JsonProperty("total_tokens") Integer totalTokens
+    ) {
+    }
+
+    private String extractChatAnswer(ChatResponse response) {
+        if (response == null || response.choices() == null || response.choices().isEmpty()) {
+            throw new LlmException(LlmErrorType.EMPTY_CHOICES, "chat/completions 返回空 choices");
+        }
+        ChatMessage msg = response.choices().get(0).message();
+        if (msg == null || !StringUtils.hasText(msg.content())) {
+            throw new LlmException(LlmErrorType.EMPTY_MESSAGE_CONTENT, "chat/completions choices[0].message.content 为空");
+        }
+        return msg.content();
     }
 }

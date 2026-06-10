@@ -17,6 +17,8 @@ public class RagProperties {
 
     private Context context = new Context();
 
+    private QueryRewrite queryRewrite = new QueryRewrite();
+
     public int getChunkSize() {
         return chunkSize;
     }
@@ -57,11 +59,41 @@ public class RagProperties {
         this.context = context;
     }
 
+    public QueryRewrite getQueryRewrite() {
+        return queryRewrite;
+    }
+
+    public void setQueryRewrite(QueryRewrite queryRewrite) {
+        this.queryRewrite = queryRewrite;
+    }
+
+    public static class QueryRewrite {
+
+        private boolean enabled = false;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
     public static class Search {
 
         private int topK = 3;
 
         private double scoreThreshold = 0.3;
+
+        /** 检索模式：vector（纯向量，默认，保持原行为）、hybrid（向量+BM25 RRF 融合）、hybrid_rerank（融合后再 bge-reranker 精排）。 */
+        private RetrievalMode mode = RetrievalMode.VECTOR;
+
+        /** 召回阶段每路（向量 / BM25）各取的候选数，融合后再裁剪到 topK。 */
+        private int recallTopK = 50;
+
+        /** RRF 融合常数 k，越大越弱化排名差异，经验值 60。 */
+        private int rrfK = 60;
 
         public int getTopK() {
             return topK;
@@ -78,6 +110,36 @@ public class RagProperties {
         public void setScoreThreshold(double scoreThreshold) {
             this.scoreThreshold = scoreThreshold;
         }
+
+        public RetrievalMode getMode() {
+            return mode;
+        }
+
+        public void setMode(RetrievalMode mode) {
+            this.mode = mode;
+        }
+
+        public int getRecallTopK() {
+            return recallTopK;
+        }
+
+        public void setRecallTopK(int recallTopK) {
+            this.recallTopK = recallTopK;
+        }
+
+        public int getRrfK() {
+            return rrfK;
+        }
+
+        public void setRrfK(int rrfK) {
+            this.rrfK = rrfK;
+        }
+    }
+
+    public enum RetrievalMode {
+        VECTOR,
+        HYBRID,
+        HYBRID_RERANK
     }
 
     public static class Context {

@@ -183,6 +183,29 @@ class InMemoryVectorStoreTest {
         assertThat(results).isEmpty();
     }
 
+    @Test
+    void keywordSearch_whenExactCodeMatters_ranksChunkWithMatchingCodeFirst() {
+        // 向量检索易把 A12345 与 A12346 混淆；BM25 靠字面精确匹配锁定正确编号。
+        vectorStore.save(chunk("right", "doc1", "订单 A12345 退款失败 原因余额不足", DocumentVisibility.PUBLIC, "user_001", "dept-a", DocumentStatus.ACTIVE, 1), List.of(1.0, 0.0));
+        vectorStore.save(chunk("wrong", "doc2", "订单 A12346 退款成功 已到账", DocumentVisibility.PUBLIC, "user_001", "dept-a", DocumentStatus.ACTIVE, 1), List.of(1.0, 0.0));
+
+        List<VectorSearchResult> results = vectorStore.keywordSearch("A12345 退款失败", request(List.of(1.0, 0.0), 10, 0.1, "user_001", "dept-a"));
+
+        assertThat(results).isNotEmpty();
+        assertThat(results.get(0).getChunk().getChunkId()).isEqualTo("right");
+        assertThat(results.get(0).getDebugInfo()).isEqualTo("bm25");
+    }
+
+    @Test
+    void keywordSearch_respectsPermissionFilter() {
+        vectorStore.save(chunk("own", "doc1", "退款 流程 说明", DocumentVisibility.PRIVATE, "user_001", "dept-a", DocumentStatus.ACTIVE, 1), List.of(1.0, 0.0));
+        vectorStore.save(chunk("other", "doc2", "退款 流程 说明", DocumentVisibility.PRIVATE, "user_002", "dept-a", DocumentStatus.ACTIVE, 1), List.of(1.0, 0.0));
+
+        List<VectorSearchResult> results = vectorStore.keywordSearch("退款流程", request(List.of(1.0, 0.0), 10, 0.1, "user_001", "dept-a"));
+
+        assertThat(results).extracting(result -> result.getChunk().getChunkId()).containsExactly("own");
+    }
+
     private static VectorSearchRequest request(List<Double> queryVector, int topK, double scoreThreshold, String userId, String department) {
         VectorSearchRequest request = new VectorSearchRequest();
         request.setQueryVector(queryVector);

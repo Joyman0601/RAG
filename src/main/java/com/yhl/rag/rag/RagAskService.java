@@ -42,6 +42,7 @@ public class RagAskService {
     private final CostGovernanceService costGovernanceService;
     private final MockCurrentUserProvider currentUserProvider;
     private final MetricsService metricsService;
+    private final QueryRewriterService queryRewriterService;
 
     @Autowired
     public RagAskService(
@@ -51,7 +52,8 @@ public class RagAskService {
             LlmProperties llmProperties,
             CostGovernanceService costGovernanceService,
             MockCurrentUserProvider currentUserProvider,
-            MetricsService metricsService
+            MetricsService metricsService,
+            QueryRewriterService queryRewriterService
     ) {
         this.ragSearchService = ragSearchService;
         this.llmClient = llmClient;
@@ -60,6 +62,7 @@ public class RagAskService {
         this.costGovernanceService = costGovernanceService;
         this.currentUserProvider = currentUserProvider;
         this.metricsService = metricsService;
+        this.queryRewriterService = queryRewriterService;
     }
 
     public RagAskService(
@@ -77,7 +80,8 @@ public class RagAskService {
                 llmProperties,
                 costGovernanceService,
                 currentUserProvider,
-                new MetricsService()
+                new MetricsService(),
+                new QueryRewriterService(llmClient, ragProperties)
         );
     }
 
@@ -103,7 +107,8 @@ public class RagAskService {
                 costGovernanceService.properties().getRagMaxOutputTokens()
         );
 
-        RagSearchOutcome searchOutcome = ragSearchService.searchWithMetrics(question);
+        String retrievalQuery = queryRewriterService.rewrite(question);
+        RagSearchOutcome searchOutcome = ragSearchService.searchWithMetrics(retrievalQuery);
         List<RagSearchResult> searchResults = searchOutcome.results();
         if (searchResults.isEmpty()) {
             metricsService.recordRagNoAnswer();

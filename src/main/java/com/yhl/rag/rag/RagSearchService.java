@@ -11,6 +11,7 @@ import com.yhl.rag.llm.EmbeddingClient;
 import com.yhl.rag.llm.LlmProperties;
 import com.yhl.rag.llm.LlmErrorType;
 import com.yhl.rag.llm.LlmException;
+import com.yhl.rag.llm.RerankClient;
 import com.yhl.rag.security.CurrentUser;
 import com.yhl.rag.security.MockCurrentUserProvider;
 import com.yhl.rag.vector.VectorSearchRequest;
@@ -34,6 +35,7 @@ public class RagSearchService {
     private final RagSearchCache ragSearchCache;
     private final KnowledgeBaseVersionService knowledgeBaseVersionService;
     private final LlmProperties llmProperties;
+    private final RerankClient rerankClient;
 
     @Autowired
     public RagSearchService(
@@ -44,7 +46,8 @@ public class RagSearchService {
             DocumentService documentService,
             RagSearchCache ragSearchCache,
             KnowledgeBaseVersionService knowledgeBaseVersionService,
-            LlmProperties llmProperties
+            LlmProperties llmProperties,
+            RerankClient rerankClient
     ) {
         this.embeddingClient = embeddingClient;
         this.vectorStore = vectorStore;
@@ -54,6 +57,30 @@ public class RagSearchService {
         this.ragSearchCache = ragSearchCache;
         this.knowledgeBaseVersionService = knowledgeBaseVersionService;
         this.llmProperties = llmProperties;
+        this.rerankClient = rerankClient;
+    }
+
+    public RagSearchService(
+            EmbeddingClient embeddingClient,
+            VectorStore vectorStore,
+            RagProperties ragProperties,
+            MockCurrentUserProvider currentUserProvider,
+            DocumentService documentService,
+            RagSearchCache ragSearchCache,
+            KnowledgeBaseVersionService knowledgeBaseVersionService,
+            LlmProperties llmProperties
+    ) {
+        this(
+                embeddingClient,
+                vectorStore,
+                ragProperties,
+                currentUserProvider,
+                documentService,
+                ragSearchCache,
+                knowledgeBaseVersionService,
+                llmProperties,
+                null
+        );
     }
 
     public RagSearchService(
@@ -71,7 +98,8 @@ public class RagSearchService {
                 documentService,
                 new RagSearchCache(),
                 new KnowledgeBaseVersionService(),
-                new LlmProperties()
+                new LlmProperties(),
+                null
         );
     }
 
@@ -125,7 +153,9 @@ public class RagSearchService {
 
         validateSearchConfig(topK, scoreThreshold);
 
-        if (!includeBelowThreshold) {
+        boolean vectorOnly = ragProperties.getSearch().getMode() == RagProperties.RetrievalMode.VECTOR;
+
+        if (!includeBelowThreshold && vectorOnly) {
             var cached = ragSearchCache.get(cacheKey);
             if (cached.isPresent()) {
                 List<RagSearchResult> results = cached.get().getVectorResults().stream()
@@ -164,12 +194,18 @@ public class RagSearchService {
         long embeddingDurationMs = elapsedMillis(embeddingStartNanos);
         validateVector(questionVector, "问题向量为空");
 
+        RagProperties.RetrievalMode mode = ragProperties.getSearch().getMode();
+        boolean hybrid = mode != RagProperties.RetrievalMode.VECTOR;
+        // 召回阶段：hybrid 模式下两路各召回 recallTopK 候选，融合后再裁剪到 topK。
+        int recallTopK = hybrid ? Math.max(ragProperties.getSearch().getRecallTopK(), topK) : topK;
+
         long searchStartNanos = System.nanoTime();
         VectorSearchRequest vectorRequest = new VectorSearchRequest();
         vectorRequest.setQueryVector(questionVector);
-        vectorRequest.setTopK(topK);
+        vectorRequest.setTopK(recallTopK);
         vectorRequest.setScoreThreshold(scoreThreshold);
-        vectorRequest.setIncludeBelowThreshold(includeBelowThreshold);
+        // hybrid 召回放宽阈值，让 BM25 命中的精确关键词文档也能进融合池。
+        vectorRequest.setIncludeBelowThreshold(includeBelowThreshold || hybrid);
         vectorRequest.setTenantId(currentUser.getTenantId());
         vectorRequest.setUserId(currentUser.getUserId());
         vectorRequest.setDepartment(currentUser.getDepartment());
@@ -182,8 +218,22 @@ public class RagSearchService {
             vectorRequest.setDocumentVersions(readyDocumentVersions);
         }
 
-        List<VectorSearchResult> vectorResults = vectorStore.search(vectorRequest);
-        if (!includeBelowThreshold) {
+        List<VectorSearchResult> vectorResults;
+        if (hybrid) {
+            boolean rerank = mode == RagProperties.RetrievalMode.HYBRID_RERANK
+                    && rerankClient != null && rerankClient.isConfigured();
+            // 需要精排时，先把融合池放大到 recallTopK，交给 Cross-Encoder 精选；否则直接裁到 topK。
+            int fusionLimit = rerank ? recallTopK : topK;
+            List<VectorSearchResult> denseResults = vectorStore.search(vectorRequest);
+            List<VectorSearchResult> keywordResults = vectorStore.keywordSearch(question, vectorRequest);
+            List<VectorSearchResult> fused = fuseWithRrf(denseResults, keywordResults, ragProperties.getSearch().getRrfK(), fusionLimit);
+            vectorResults = rerank ? rerankResults(question, fused, topK) : fused;
+            log.info("rag_hybrid_recall mode={} denseCount={} keywordCount={} fusedCount={} rerank={} finalCount={} rrfK={}",
+                    mode, denseResults.size(), keywordResults.size(), fused.size(), rerank, vectorResults.size(), ragProperties.getSearch().getRrfK());
+        } else {
+            vectorResults = vectorStore.search(vectorRequest);
+        }
+        if (!includeBelowThreshold && !hybrid) {
             ragSearchCache.put(cacheKey, vectorResults, embeddingDurationMs, elapsedMillis(searchStartNanos));
         }
         List<RagSearchResult> results = vectorResults.stream()
@@ -247,6 +297,74 @@ public class RagSearchService {
                 embeddingDurationMs,
                 searchDurationMs,
                 elapsedMillis(startNanos));
+    }
+
+    /**
+     * RRF（Reciprocal Rank Fusion，倒数排名融合）：不依赖两路分数量纲，只看各自排名。
+     * 文档在某路排第 r 名（从 1 起）得 1/(k + r) 分，多路相加后重排，取前 limit。
+     */
+    private List<VectorSearchResult> fuseWithRrf(
+            List<VectorSearchResult> denseResults,
+            List<VectorSearchResult> keywordResults,
+            int rrfK,
+            int limit
+    ) {
+        Map<String, Double> fusedScore = new java.util.LinkedHashMap<>();
+        Map<String, VectorSearchResult> chunkById = new java.util.LinkedHashMap<>();
+        accumulateRrf(denseResults, rrfK, fusedScore, chunkById);
+        accumulateRrf(keywordResults, rrfK, fusedScore, chunkById);
+
+        return fusedScore.entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(limit)
+                .map(entry -> {
+                    VectorSearchResult base = chunkById.get(entry.getKey());
+                    return new VectorSearchResult(base.getChunk(), entry.getValue(), true,
+                            "rrf score=" + String.format(java.util.Locale.ROOT, "%.4f", entry.getValue()));
+                })
+                .toList();
+    }
+
+    /**
+     * Cross-Encoder 精排：把融合候选的正文送 bge-reranker，按相关性重排后取前 topK。
+     * rerank 调用失败时降级返回原融合顺序的前 topK，保证检索链路不因外部依赖中断。
+     */
+    private List<VectorSearchResult> rerankResults(String question, List<VectorSearchResult> candidates, int topK) {
+        if (candidates.isEmpty()) {
+            return candidates;
+        }
+        try {
+            List<String> documents = candidates.stream()
+                    .map(result -> result.getChunk().getContent())
+                    .toList();
+            List<Integer> orderedIndexes = rerankClient.rerank(question, documents, topK);
+            if (orderedIndexes.isEmpty()) {
+                return candidates.stream().limit(topK).toList();
+            }
+            return orderedIndexes.stream()
+                    .limit(topK)
+                    .map(candidates::get)
+                    .map(result -> new VectorSearchResult(result.getChunk(), result.getScore(), true, "reranked"))
+                    .toList();
+        } catch (LlmException exception) {
+            log.warn("rag_rerank_fallback errorType={} message={}", exception.getErrorType(), exception.getMessage());
+            return candidates.stream().limit(topK).toList();
+        }
+    }
+
+    private void accumulateRrf(
+            List<VectorSearchResult> results,
+            int rrfK,
+            Map<String, Double> fusedScore,
+            Map<String, VectorSearchResult> chunkById
+    ) {
+        for (int rank = 0; rank < results.size(); rank++) {
+            VectorSearchResult result = results.get(rank);
+            String chunkId = result.getChunk().getChunkId();
+            double contribution = 1.0 / (rrfK + rank + 1);
+            fusedScore.merge(chunkId, contribution, Double::sum);
+            chunkById.putIfAbsent(chunkId, result);
+        }
     }
 
     private RagSearchResult toRagSearchResult(VectorSearchResult vectorResult) {

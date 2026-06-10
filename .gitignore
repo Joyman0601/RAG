@@ -38,3 +38,20 @@ buildNumber.properties
 
 # Session
 next-window-continuation.md
+
+# Python venv
+.venv/
+eval/.venv/
+eval/__pycache__/
+
+# Local env (secrets)
+.env
+.env.local
+*.env.local
+.secrets.env
+*.secrets.env
+.env.measurement
+run-measurement.ps1
+run-measurement.cmd
+measurement-report.md
+measurement-report.json

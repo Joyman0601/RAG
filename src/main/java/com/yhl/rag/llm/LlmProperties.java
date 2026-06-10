@@ -29,9 +29,20 @@ public class LlmProperties {
 
     private int embeddingTimeout = 30;
 
+    private String rerankBaseUrl;
+
+    private String rerankApiKey;
+
+    private String rerankModel = "BAAI/bge-reranker-v2-m3";
+
+    private int rerankTimeout = 30;
+
     private String proxyHost;
 
     private int proxyPort;
+
+    /** 调用风格：responses（OpenAI Responses API，默认）或 chat（/v1/chat/completions，兼容硅基流动等标准 OpenAI 端点）。 */
+    private String apiStyle = "responses";
 
     public String getApiKey() {
         return apiKey;
@@ -121,6 +132,38 @@ public class LlmProperties {
         this.embeddingTimeout = embeddingTimeout;
     }
 
+    public String getRerankBaseUrl() {
+        return rerankBaseUrl;
+    }
+
+    public void setRerankBaseUrl(String rerankBaseUrl) {
+        this.rerankBaseUrl = rerankBaseUrl;
+    }
+
+    public String getRerankApiKey() {
+        return rerankApiKey;
+    }
+
+    public void setRerankApiKey(String rerankApiKey) {
+        this.rerankApiKey = rerankApiKey;
+    }
+
+    public String getRerankModel() {
+        return rerankModel;
+    }
+
+    public void setRerankModel(String rerankModel) {
+        this.rerankModel = rerankModel;
+    }
+
+    public int getRerankTimeout() {
+        return rerankTimeout;
+    }
+
+    public void setRerankTimeout(int rerankTimeout) {
+        this.rerankTimeout = rerankTimeout;
+    }
+
     public String getProxyHost() {
         return proxyHost;
     }
@@ -135,5 +178,13 @@ public class LlmProperties {
 
     public void setProxyPort(int proxyPort) {
         this.proxyPort = proxyPort;
+    }
+
+    public String getApiStyle() {
+        return apiStyle;
+    }
+
+    public void setApiStyle(String apiStyle) {
+        this.apiStyle = apiStyle;
     }
 }

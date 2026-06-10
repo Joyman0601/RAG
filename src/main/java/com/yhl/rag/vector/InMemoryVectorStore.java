@@ -51,6 +51,138 @@ public class InMemoryVectorStore implements VectorStore {
     }
 
     @Override
+    public List<VectorSearchResult> keywordSearch(String queryText, VectorSearchRequest request) {
+        if (request == null || !StringUtils.hasText(queryText)) {
+            return List.of();
+        }
+
+        List<DocumentChunk> corpus = entries.values().stream()
+                .map(Entry::chunk)
+                .filter(chunk -> matchesFilter(chunk, request))
+                .toList();
+        if (corpus.isEmpty()) {
+            return List.of();
+        }
+
+        List<List<String>> docTokens = corpus.stream()
+                .map(chunk -> tokenize(chunk.getContent()))
+                .toList();
+        List<String> queryTokens = tokenize(queryText).stream().distinct().toList();
+        if (queryTokens.isEmpty()) {
+            return List.of();
+        }
+
+        int docCount = corpus.size();
+        double avgDocLength = docTokens.stream().mapToInt(List::size).average().orElse(0.0);
+
+        Map<String, Integer> documentFrequency = new java.util.HashMap<>();
+        for (List<String> tokens : docTokens) {
+            for (String term : Set.copyOf(tokens)) {
+                documentFrequency.merge(term, 1, Integer::sum);
+            }
+        }
+
+        double k1 = 1.5;
+        double b = 0.75;
+        int topK = Math.max(request.getTopK(), 1);
+
+        return java.util.stream.IntStream.range(0, corpus.size())
+                .mapToObj(i -> {
+                    double score = bm25Score(queryTokens, docTokens.get(i), documentFrequency, docCount, avgDocLength, k1, b);
+                    return new VectorSearchResult(copyChunk(corpus.get(i)), score, score > 0, "bm25");
+                })
+                .filter(result -> result.getScore() > 0)
+                .sorted(Comparator.comparingDouble(VectorSearchResult::getScore).reversed())
+                .limit(topK)
+                .toList();
+    }
+
+    private static double bm25Score(
+            List<String> queryTokens,
+            List<String> docTokens,
+            Map<String, Integer> documentFrequency,
+            int docCount,
+            double avgDocLength,
+            double k1,
+            double b
+    ) {
+        Map<String, Integer> termFrequency = new java.util.HashMap<>();
+        for (String term : docTokens) {
+            termFrequency.merge(term, 1, Integer::sum);
+        }
+        int docLength = docTokens.size();
+        double score = 0.0;
+        for (String term : queryTokens) {
+            int tf = termFrequency.getOrDefault(term, 0);
+            if (tf == 0) {
+                continue;
+            }
+            int df = documentFrequency.getOrDefault(term, 0);
+            double idf = Math.log(1 + (docCount - df + 0.5) / (df + 0.5));
+            double denominator = tf + k1 * (1 - b + b * (avgDocLength == 0 ? 0 : docLength / avgDocLength));
+            score += idf * (tf * (k1 + 1)) / denominator;
+        }
+        return score;
+    }
+
+    /** 轻量分词：CJK 字符切相邻二元组（bigram），ASCII 连续字母/数字作为词元；学习项目够用，无需第三方分词库。 */
+    private static List<String> tokenize(String text) {
+        if (!StringUtils.hasText(text)) {
+            return List.of();
+        }
+        String lower = text.toLowerCase();
+        List<String> tokens = new java.util.ArrayList<>();
+        StringBuilder asciiToken = new StringBuilder();
+        List<Character> cjkRun = new java.util.ArrayList<>();
+        for (int i = 0; i < lower.length(); i++) {
+            char c = lower.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                if (!cjkRun.isEmpty()) {
+                    addCjkBigrams(cjkRun, tokens);
+                    cjkRun.clear();
+                }
+                asciiToken.append(c);
+            } else if (isCjk(c)) {
+                if (asciiToken.length() > 0) {
+                    tokens.add(asciiToken.toString());
+                    asciiToken.setLength(0);
+                }
+                cjkRun.add(c);
+            } else {
+                if (asciiToken.length() > 0) {
+                    tokens.add(asciiToken.toString());
+                    asciiToken.setLength(0);
+                }
+                if (!cjkRun.isEmpty()) {
+                    addCjkBigrams(cjkRun, tokens);
+                    cjkRun.clear();
+                }
+            }
+        }
+        if (asciiToken.length() > 0) {
+            tokens.add(asciiToken.toString());
+        }
+        if (!cjkRun.isEmpty()) {
+            addCjkBigrams(cjkRun, tokens);
+        }
+        return tokens;
+    }
+
+    private static void addCjkBigrams(List<Character> cjkRun, List<String> tokens) {
+        if (cjkRun.size() == 1) {
+            tokens.add(String.valueOf(cjkRun.get(0)));
+            return;
+        }
+        for (int i = 0; i < cjkRun.size() - 1; i++) {
+            tokens.add("" + cjkRun.get(i) + cjkRun.get(i + 1));
+        }
+    }
+
+    private static boolean isCjk(char c) {
+        return c >= 0x4E00 && c <= 0x9FFF;
+    }
+
+    @Override
     public void deleteByDocumentId(String documentId) {
         if (!StringUtils.hasText(documentId)) {
             return;
