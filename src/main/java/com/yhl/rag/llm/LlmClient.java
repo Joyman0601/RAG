@@ -107,13 +107,28 @@ public class LlmClient {
         Integer promptTokens;
         Integer completionTokens;
         Integer totalTokens;
+        Integer cachedTokens = null;
+        Integer cacheCreationInputTokens = null;
 
         if (chatStyle) {
             // chat/completions 路径（兼容硅基流动等标准 OpenAI 端点）
             // system prompt 用 instructions，user messages 直接传入
-            List<Map<String, String>> messages = new ArrayList<>();
+            boolean cacheEnabled = llmProperties.isCacheEnabled();
+            List<Map<String, Object>> messages = new ArrayList<>();
             if (StringUtils.hasText(instructions)) {
-                messages.add(Map.of("role", "system", "content", instructions));
+                if (cacheEnabled) {
+                    // DashScope 显式缓存：system content 须为带 cache_control 的数组结构
+                    messages.add(Map.of(
+                            "role", "system",
+                            "content", List.of(Map.of(
+                                    "type", "text",
+                                    "text", instructions,
+                                    "cache_control", Map.of("type", "ephemeral")
+                            ))
+                    ));
+                } else {
+                    messages.add(Map.of("role", "system", "content", instructions));
+                }
             }
             for (LlmMessage m : input) {
                 messages.add(Map.of("role", m.role(), "content", m.content()));
@@ -161,6 +176,10 @@ public class LlmClient {
             promptTokens = chatResponse.usage() != null ? chatResponse.usage().promptTokens() : null;
             completionTokens = chatResponse.usage() != null ? chatResponse.usage().completionTokens() : null;
             totalTokens = chatResponse.usage() != null ? chatResponse.usage().totalTokens() : null;
+            if (chatResponse.usage() != null && chatResponse.usage().promptTokensDetails() != null) {
+                cachedTokens = chatResponse.usage().promptTokensDetails().cachedTokens();
+                cacheCreationInputTokens = chatResponse.usage().promptTokensDetails().cacheCreationInputTokens();
+            }
 
         } else {
             // responses 路径（OpenAI Responses API，默认）
@@ -210,7 +229,7 @@ public class LlmClient {
             totalTokens = totalTokens(response);
         }
         long latencyMs = java.time.Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
-        logSuccess(startNanos, inputChars, charLength(answer), promptTokens, completionTokens, totalTokens);
+        logSuccess(startNanos, inputChars, charLength(answer), promptTokens, completionTokens, totalTokens, cachedTokens);
         if (langfuseTracer != null) {
             String traceId = RequestContext.requestIdOr(null);
             String inputSummary = instructions + "\n" + input.stream()
@@ -218,13 +237,15 @@ public class LlmClient {
                     .reduce("", (a, b) -> a + "\n" + b);
             langfuseTracer.recordGeneration(traceId, "llm_call",
                     llmProperties.getModel(), inputSummary, answer,
-                    promptTokens, completionTokens, latencyMs);
+                    promptTokens, completionTokens, latencyMs, cachedTokens);
         }
         return new LlmGenerationResult(
                 answer,
                 promptTokens,
                 completionTokens,
-                totalTokens
+                totalTokens,
+                cachedTokens,
+                cacheCreationInputTokens
         );
     }
 
@@ -288,7 +309,7 @@ public class LlmClient {
                 throw new LlmException(LlmErrorType.EMPTY_OUTPUT, "模型接口流式响应为空");
             }
 
-            logSuccess(startNanos, inputChars, outputChars.get(), null, null, null);
+            logSuccess(startNanos, inputChars, outputChars.get(), null, null, null, null);
             emitter.complete();
         } catch (LlmException exception) {
             logFailure(startNanos, inputChars, outputChars.get(), exception.getErrorType());
@@ -546,18 +567,28 @@ public class LlmClient {
             int outputChars,
             Integer promptTokens,
             Integer completionTokens,
-            Integer totalTokens
+            Integer totalTokens,
+            Integer cachedTokens
     ) {
-        log.info("llm_call requestId={} model={} promptTokens={} completionTokens={} totalTokens={} latencyMs={} inputChars={} outputChars={} success=true errorType={}",
+        log.info("llm_call requestId={} model={} promptTokens={} completionTokens={} totalTokens={} cachedTokens={} cacheHitRatio={} latencyMs={} inputChars={} outputChars={} success=true errorType={}",
                 RequestContext.requestId(),
                 llmProperties.getModel(),
                 promptTokens,
                 completionTokens,
                 totalTokens,
+                cachedTokens,
+                cacheHitRatio(cachedTokens, promptTokens),
                 elapsedMillis(startNanos),
                 inputChars,
                 outputChars,
                 null);
+    }
+
+    private static String cacheHitRatio(Integer cachedTokens, Integer promptTokens) {
+        if (cachedTokens == null || promptTokens == null || promptTokens <= 0) {
+            return null;
+        }
+        return String.format("%.3f", (double) cachedTokens / promptTokens);
     }
 
     private void logFailure(long startNanos, int inputChars, int outputChars, LlmErrorType errorType) {
@@ -627,7 +658,7 @@ public class LlmClient {
 
     private record ChatRequest(
             String model,
-            List<Map<String, String>> messages,
+            List<Map<String, Object>> messages,
             double temperature,
             @JsonProperty("max_tokens") int maxTokens
     ) {
@@ -648,7 +679,14 @@ public class LlmClient {
     private record ChatUsage(
             @JsonProperty("prompt_tokens") Integer promptTokens,
             @JsonProperty("completion_tokens") Integer completionTokens,
-            @JsonProperty("total_tokens") Integer totalTokens
+            @JsonProperty("total_tokens") Integer totalTokens,
+            @JsonProperty("prompt_tokens_details") PromptTokensDetails promptTokensDetails
+    ) {
+    }
+
+    private record PromptTokensDetails(
+            @JsonProperty("cached_tokens") Integer cachedTokens,
+            @JsonProperty("cache_creation_input_tokens") Integer cacheCreationInputTokens
     ) {
     }
 

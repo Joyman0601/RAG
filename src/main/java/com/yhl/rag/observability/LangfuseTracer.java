@@ -36,6 +36,7 @@ public class LangfuseTracer {
      * @param promptTokens    输入 token 数
      * @param completionTokens 输出 token 数
      * @param latencyMs       本次调用耗时
+     * @param cachedTokens    Prompt Caching 命中的 token 数（不支持时为 null）
      */
     public void recordGeneration(
             String traceId,
@@ -45,7 +46,8 @@ public class LangfuseTracer {
             String output,
             Integer promptTokens,
             Integer completionTokens,
-            long latencyMs
+            long latencyMs,
+            Integer cachedTokens
     ) {
         if (!properties.isEnabled()) {
             return;
@@ -58,9 +60,23 @@ public class LangfuseTracer {
         Map<String, Object> traceEvent = buildTraceEvent(resolvedTraceId, name, now);
         Map<String, Object> genEvent = buildGenerationEvent(
                 generationId, resolvedTraceId, name, model,
-                input, output, promptTokens, completionTokens, latencyMs, now);
+                input, output, promptTokens, completionTokens, latencyMs, cachedTokens, now);
 
         client.sendBatchAsync(List.of(traceEvent, genEvent));
+    }
+
+    /** 兼容旧签名（无 Prompt Caching），cachedTokens 传 null。 */
+    public void recordGeneration(
+            String traceId,
+            String name,
+            String model,
+            String input,
+            String output,
+            Integer promptTokens,
+            Integer completionTokens,
+            long latencyMs
+    ) {
+        recordGeneration(traceId, name, model, input, output, promptTokens, completionTokens, latencyMs, null);
     }
 
     private Map<String, Object> buildTraceEvent(String traceId, String name, String timestamp) {
@@ -80,7 +96,7 @@ public class LangfuseTracer {
     private Map<String, Object> buildGenerationEvent(
             String generationId, String traceId, String name, String model,
             String input, String output,
-            Integer promptTokens, Integer completionTokens, long latencyMs, String timestamp
+            Integer promptTokens, Integer completionTokens, long latencyMs, Integer cachedTokens, String timestamp
     ) {
         Map<String, Object> usage = new HashMap<>();
         if (promptTokens != null) usage.put("input", promptTokens);
@@ -88,6 +104,7 @@ public class LangfuseTracer {
         if (promptTokens != null && completionTokens != null) {
             usage.put("total", promptTokens + completionTokens);
         }
+        if (cachedTokens != null) usage.put("input_cached", cachedTokens);
 
         Map<String, Object> body = new HashMap<>();
         body.put("id", generationId);

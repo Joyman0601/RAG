@@ -20,6 +20,8 @@ public class UsageRecord {
 
     private int totalTokens;
 
+    private int cachedTokens;
+
     private double estimatedCost;
 
     private long latencyMs;
@@ -45,6 +47,25 @@ public class UsageRecord {
             boolean success,
             Instant createdAt
     ) {
+        this(requestId, tenantId, userId, interfaceName, model, promptTokens, completionTokens,
+                totalTokens, 0, estimatedCost, latencyMs, success, createdAt);
+    }
+
+    public UsageRecord(
+            String requestId,
+            String tenantId,
+            String userId,
+            String interfaceName,
+            String model,
+            int promptTokens,
+            int completionTokens,
+            int totalTokens,
+            int cachedTokens,
+            double estimatedCost,
+            long latencyMs,
+            boolean success,
+            Instant createdAt
+    ) {
         this.requestId = requestId;
         this.tenantId = tenantId;
         this.userId = userId;
@@ -53,6 +74,7 @@ public class UsageRecord {
         this.promptTokens = promptTokens;
         this.completionTokens = completionTokens;
         this.totalTokens = totalTokens;
+        this.cachedTokens = cachedTokens;
         this.estimatedCost = estimatedCost;
         this.latencyMs = latencyMs;
         this.success = success;
@@ -89,6 +111,10 @@ public class UsageRecord {
 
     public int getTotalTokens() {
         return totalTokens;
+    }
+
+    public int getCachedTokens() {
+        return cachedTokens;
     }
 
     public double getEstimatedCost() {

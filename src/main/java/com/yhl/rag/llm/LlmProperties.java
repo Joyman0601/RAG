@@ -44,6 +44,13 @@ public class LlmProperties {
     /** 调用风格：responses（OpenAI Responses API，默认）或 chat（/v1/chat/completions，兼容硅基流动等标准 OpenAI 端点）。 */
     private String apiStyle = "responses";
 
+    /**
+     * 是否启用 Prompt Caching（仅 chat 风格生效）。开时在 system 消息注入 cache_control:{type:ephemeral}，
+     * 并解析响应里的 prompt_tokens_details.cached_tokens。仅 DashScope 等显式缓存接口认这个结构，
+     * 默认关闭以兼容硅基流动/Responses 端点。
+     */
+    private boolean cacheEnabled = false;
+
     public String getApiKey() {
         return apiKey;
     }
@@ -186,5 +193,13 @@ public class LlmProperties {
 
     public void setApiStyle(String apiStyle) {
         this.apiStyle = apiStyle;
+    }
+
+    public boolean isCacheEnabled() {
+        return cacheEnabled;
+    }
+
+    public void setCacheEnabled(boolean cacheEnabled) {
+        this.cacheEnabled = cacheEnabled;
     }
 }

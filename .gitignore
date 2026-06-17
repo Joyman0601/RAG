@@ -55,3 +55,8 @@ run-measurement.ps1
 run-measurement.cmd
 measurement-report.md
 measurement-report.json
+prompt-caching-report.md
+prompt-caching-report.json
+
+# Prompt-caching experiment scratch (probe scripts)
+probe/

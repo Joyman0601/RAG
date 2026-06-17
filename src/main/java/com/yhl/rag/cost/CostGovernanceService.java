@@ -103,6 +103,7 @@ public class CostGovernanceService {
         int promptTokens = valueOr(result == null ? null : result.getPromptTokens(), estimatedPrompt);
         int completionTokens = valueOr(result == null ? null : result.getCompletionTokens(), estimatedCompletion);
         int totalTokens = valueOr(result == null ? null : result.getTotalTokens(), promptTokens + completionTokens);
+        int cachedTokens = Math.max(0, result == null || result.getCachedTokens() == null ? 0 : result.getCachedTokens());
         UsageRecord usageRecord = new UsageRecord(
                 requestId,
                 tenantId,
@@ -112,6 +113,7 @@ public class CostGovernanceService {
                 promptTokens,
                 completionTokens,
                 totalTokens,
+                cachedTokens,
                 totalTokens / 1000.0 * costProperties.getEstimatedCostPerThousandTokens(),
                 latencyMs,
                 success,

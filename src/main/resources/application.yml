@@ -43,6 +43,7 @@ llm:
   proxy-host: ${LLM_PROXY_HOST:}
   proxy-port: ${LLM_PROXY_PORT:0}
   api-style: ${LLM_API_STYLE:responses}
+  cache-enabled: ${LLM_CACHE_ENABLED:false}
 
 langfuse:
   enabled: ${LANGFUSE_ENABLED:false}
