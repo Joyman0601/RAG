@@ -1,0 +1,114 @@
+# 生产（演示）编排：pgvector + Spring Boot + Nginx(前端一体)
+#
+# 启动：
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# 查看：
+#   docker compose -f docker-compose.prod.yml ps
+#   docker compose -f docker-compose.prod.yml logs -f app
+# 停机：
+#   docker compose -f docker-compose.prod.yml down
+# 灌 seed 文档：
+#   见 README「生产环境灌脱敏文档」章节
+
+name: rag-prod
+
+networks:
+  rag-net:
+    driver: bridge
+
+volumes:
+  rag-pgvector-data:
+
+services:
+  # ---------- 向量数据库 ----------
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: rag-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DB:-rag}
+      POSTGRES_USER: ${PG_USER:-rag}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required in .env.prod}
+    volumes:
+      - rag-pgvector-data:/var/lib/postgresql/data
+      # 首次启动会执行 db/init/*.sql（若存在），用于建 vector 扩展和表
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-rag} -d ${PG_DB:-rag}"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    # 不 expose 端口到宿主机，仅内部访问
+    networks:
+      - rag-net
+
+  # ---------- Spring Boot 后端 ----------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rag-app:latest
+    container_name: rag-app
+    restart: unless-stopped
+    depends_on:
+      pgvector:
+        condition: service_healthy
+    environment:
+      # ----- 数据库 -----
+      PG_URL: jdbc:postgresql://pgvector:5432/${PG_DB:-rag}
+      PG_USER: ${PG_USER:-rag}
+      PG_PASSWORD: ${PG_PASSWORD}
+      # ----- 向量维度（必须与 embedding 模型输出维度一致）-----
+      VECTORSTORE_DIMENSION: ${VECTORSTORE_DIMENSION:-1024}
+      # ----- LLM（chat 主模型）-----
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_API_STYLE: ${LLM_API_STYLE:-chat}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-800}
+      # ----- Embedding -----
+      LLM_EMBEDDING_API_KEY: ${LLM_EMBEDDING_API_KEY}
+      LLM_EMBEDDING_BASE_URL: ${LLM_EMBEDDING_BASE_URL}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL}
+      LLM_EMBEDDING_STYLE: ${LLM_EMBEDDING_STYLE:-openai}
+      # ----- Rerank（可选，不填则 hybrid+rerank 模式降级为 hybrid）-----
+      LLM_RERANK_API_KEY: ${LLM_RERANK_API_KEY:-}
+      LLM_RERANK_BASE_URL: ${LLM_RERANK_BASE_URL:-https://api.siliconflow.cn/v1}
+      LLM_RERANK_MODEL: ${LLM_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      # ----- Step 4 加固：测试 token / 上传关闭 / LLM 日上限 -----
+      DEMO_TOKEN: ${DEMO_TOKEN:?DEMO_TOKEN is required}
+      DEMO_UPLOAD_ENABLED: ${DEMO_UPLOAD_ENABLED:-false}
+      MAX_DAILY_LLM_CALLS: ${MAX_DAILY_LLM_CALLS:-500}
+      DEMO_RATE_LIMIT_ENABLED: ${DEMO_RATE_LIMIT_ENABLED:-false}
+      DEMO_RATE_LIMIT_RPM: ${DEMO_RATE_LIMIT_RPM:-10}
+      # ----- Langfuse 观测（Step 5 打开）-----
+      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-false}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+    networks:
+      - rag-net
+    # 后端端口不 expose 到宿主机；仅通过 web (Nginx) 反代对外
+    # 若排障需要临时暴露：docker compose ... run -p 19090:19090 app
+
+  # ---------- Nginx（含前端静态 + /api 反代 + HTTPS）----------
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: rag-web:latest
+    container_name: rag-web
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Let's Encrypt 证书目录（宿主机 certbot 生成后挂进来）
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # certbot webroot 续签用
+      - ./certbot-webroot:/var/www/certbot
+    networks:
+      - rag-net

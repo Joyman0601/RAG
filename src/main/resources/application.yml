@@ -1,0 +1,127 @@
+server:
+  port: 19090
+
+spring:
+  application:
+    name: rag-learning
+  # 默认 memory 模式不需要数据库；排除 DataSource 自动配置，保证无 PG 时也能裸启动。
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+vectorstore:
+  backend: ${VECTORSTORE_BACKEND:memory}   # memory | pgvector
+  dimension: ${VECTORSTORE_DIMENSION:4096}
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{requestId:-no-request}] %logger{36} - %msg%n"
+
+rag:
+  debug-enabled: ${RAG_DEBUG_ENABLED:false}
+  chunk-size: ${RAG_CHUNK_SIZE:600}
+  chunk-overlap: ${RAG_CHUNK_OVERLAP:100}
+  chunk:
+    strategy: ${RAG_CHUNK_STRATEGY:FIXED}        # FIXED | MARKDOWN | SEMANTIC
+    parent-document:
+      enabled: ${RAG_CHUNK_PARENT_DOCUMENT_ENABLED:false}
+    semantic:
+      threshold: ${RAG_CHUNK_SEMANTIC_THRESHOLD:0.6}
+  search:
+    top-k: ${RAG_SEARCH_TOP_K:3}
+    score-threshold: ${RAG_SEARCH_SCORE_THRESHOLD:0.3}
+    mode: ${RAG_SEARCH_MODE:vector}
+    recall-top-k: ${RAG_SEARCH_RECALL_TOP_K:50}
+    rrf-k: ${RAG_SEARCH_RRF_K:60}
+  context:
+    max-chars: ${RAG_CONTEXT_MAX_CHARS:3000}
+  query-rewrite:
+    enabled: ${RAG_QUERY_REWRITE_ENABLED:false}
+    conversation:
+      enabled: ${RAG_QUERY_REWRITE_CONVERSATION_ENABLED:false}        # 多轮会话指代消解改写，需 query-rewrite.enabled 作总开关
+      history-turns: ${RAG_QUERY_REWRITE_CONVERSATION_HISTORY_TURNS:5}
+      summary-threshold: ${RAG_QUERY_REWRITE_CONVERSATION_SUMMARY_THRESHOLD:10}
+  contextual:
+    enabled: ${RAG_CONTEXTUAL_ENABLED:false}   # Contextual Retrieval：入库时给子块加 LLM 上下文前缀再 embedding
+  multimodal:
+    enabled: ${RAG_MULTIMODAL_ENABLED:false}   # 多模态：接受 pdf/png/jpg，图片走 VL embedding 进同一向量空间
+
+llm:
+  api-key: ${LLM_API_KEY:}
+  base-url: ${LLM_BASE_URL:https://co.yes.vg}
+  model: ${LLM_MODEL:gpt-5.5}
+  temperature: ${LLM_TEMPERATURE:0.7}
+  timeout-seconds: ${LLM_TIMEOUT_SECONDS:30}
+  max-output-tokens: ${LLM_MAX_OUTPUT_TOKENS:800}
+  max-input-chars: ${LLM_MAX_INPUT_CHARS:2000}
+  embedding-base-url: ${LLM_EMBEDDING_BASE_URL:}
+  embedding-api-key: ${LLM_EMBEDDING_API_KEY:}
+  embedding-model: ${LLM_EMBEDDING_MODEL:text-embedding-3-small}
+  embedding-style: ${LLM_EMBEDDING_STYLE:openai}   # openai | dashscope-multimodal（真多模态：文本+图片同一 VL 模型）
+  embedding-timeout: ${LLM_EMBEDDING_TIMEOUT:30}
+  rerank-base-url: ${LLM_RERANK_BASE_URL:https://api.siliconflow.cn/v1}
+  rerank-api-key: ${LLM_RERANK_API_KEY:}
+  rerank-model: ${LLM_RERANK_MODEL:BAAI/bge-reranker-v2-m3}
+  rerank-timeout: ${LLM_RERANK_TIMEOUT:30}
+  proxy-host: ${LLM_PROXY_HOST:}
+  proxy-port: ${LLM_PROXY_PORT:0}
+  api-style: ${LLM_API_STYLE:responses}
+  cache-enabled: ${LLM_CACHE_ENABLED:false}
+
+langfuse:
+  enabled: ${LANGFUSE_ENABLED:false}
+  host: ${LANGFUSE_HOST:http://localhost:3000}
+  public-key: ${LANGFUSE_PUBLIC_KEY:}
+  secret-key: ${LANGFUSE_SECRET_KEY:}
+
+agent:
+  tool-rollout:
+    tools:
+      query_order:
+        enabled: ${AGENT_TOOL_QUERY_ORDER_ENABLED:true}
+        shadow-only: ${AGENT_TOOL_QUERY_ORDER_SHADOW_ONLY:false}
+        auto-execute: ${AGENT_TOOL_QUERY_ORDER_AUTO_EXECUTE:true}
+        requires-confirmation: ${AGENT_TOOL_QUERY_ORDER_REQUIRES_CONFIRMATION:false}
+        max-calls-per-request: ${AGENT_TOOL_QUERY_ORDER_MAX_CALLS_PER_REQUEST:3}
+      search_knowledge_base:
+        enabled: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_ENABLED:true}
+        shadow-only: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_SHADOW_ONLY:false}
+        auto-execute: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_AUTO_EXECUTE:true}
+        requires-confirmation: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_REQUIRES_CONFIRMATION:false}
+        max-calls-per-request: ${AGENT_TOOL_SEARCH_KNOWLEDGE_BASE_MAX_CALLS_PER_REQUEST:3}
+      cancel_order:
+        enabled: ${AGENT_TOOL_CANCEL_ORDER_ENABLED:true}
+        shadow-only: ${AGENT_TOOL_CANCEL_ORDER_SHADOW_ONLY:false}
+        auto-execute: ${AGENT_TOOL_CANCEL_ORDER_AUTO_EXECUTE:false}
+        requires-confirmation: ${AGENT_TOOL_CANCEL_ORDER_REQUIRES_CONFIRMATION:true}
+        max-calls-per-request: ${AGENT_TOOL_CANCEL_ORDER_MAX_CALLS_PER_REQUEST:1}
+  safety:
+    max-input-length: ${AGENT_SAFETY_MAX_INPUT_LENGTH:2000}
+    max-output-tokens: ${AGENT_SAFETY_MAX_OUTPUT_TOKENS:800}
+    max-agent-steps: ${AGENT_SAFETY_MAX_AGENT_STEPS:3}
+    max-agent-duration-ms: ${AGENT_SAFETY_MAX_AGENT_DURATION_MS:10000}
+    allow-high-risk-auto-execute: ${AGENT_SAFETY_ALLOW_HIGH_RISK_AUTO_EXECUTE:false}
+    require-tool-permission-code: ${AGENT_SAFETY_REQUIRE_TOOL_PERMISSION_CODE:true}
+    require-tool-risk-level: ${AGENT_SAFETY_REQUIRE_TOOL_RISK_LEVEL:true}
+    require-confirmation-for-high-risk: ${AGENT_SAFETY_REQUIRE_CONFIRMATION_FOR_HIGH_RISK:true}
+    log-full-prompt: ${AGENT_SAFETY_LOG_FULL_PROMPT:false}
+
+---
+# pgvector 模式：用 --spring.profiles.active=pgvector 激活。
+# 重新启用 DataSource 自动配置并接上 PostgreSQL+pgvector。
+spring:
+  config:
+    activate:
+      on-profile: pgvector
+  autoconfigure:
+    exclude: []
+  datasource:
+    url: ${PG_URL:jdbc:postgresql://localhost:5432/rag}
+    username: ${PG_USER:rag}
+    password: ${PG_PASSWORD:rag}
+    driver-class-name: org.postgresql.Driver
+
+vectorstore:
+  backend: ${VECTORSTORE_BACKEND:pgvector}
+  dimension: ${VECTORSTORE_DIMENSION:4096}
+

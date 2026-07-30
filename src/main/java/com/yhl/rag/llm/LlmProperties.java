@@ -1,0 +1,220 @@
+package com.yhl.rag.llm;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+@Component
+@ConfigurationProperties(prefix = "llm")
+public class LlmProperties {
+
+    private String apiKey;
+
+    private String baseUrl;
+
+    private String model;
+
+    private double temperature = 0.7;
+
+    private int timeoutSeconds = 30;
+
+    private int maxOutputTokens = 800;
+
+    private int maxInputChars = 2000;
+
+    private String embeddingBaseUrl;
+
+    private String embeddingApiKey;
+
+    private String embeddingModel = "text-embedding-3-small";
+
+    /**
+     * Embedding 调用风格：openai（默认，OpenAI 兼容 /v1/embeddings，input 传字符串/图片 dataURL）
+     * 或 dashscope-multimodal（DashScope 原生多模态：input.contents:[{text}|{image}]，
+     * 文本与图像走同一 VL 模型进同一向量空间）。默认 openai 保零回归。
+     */
+    private String embeddingStyle = "openai";
+
+    private int embeddingTimeout = 30;
+
+    private String rerankBaseUrl;
+
+    private String rerankApiKey;
+
+    private String rerankModel = "BAAI/bge-reranker-v2-m3";
+
+    private int rerankTimeout = 30;
+
+    private String proxyHost;
+
+    private int proxyPort;
+
+    /** 调用风格：responses（OpenAI Responses API，默认）或 chat（/v1/chat/completions，兼容硅基流动等标准 OpenAI 端点）。 */
+    private String apiStyle = "responses";
+
+    /**
+     * 是否启用 Prompt Caching（仅 chat 风格生效）。开时在 system 消息注入 cache_control:{type:ephemeral}，
+     * 并解析响应里的 prompt_tokens_details.cached_tokens。仅 DashScope 等显式缓存接口认这个结构，
+     * 默认关闭以兼容硅基流动/Responses 端点。
+     */
+    private boolean cacheEnabled = false;
+
+    public String getApiKey() {
+        return apiKey;
+    }
+
+    public void setApiKey(String apiKey) {
+        this.apiKey = apiKey;
+    }
+
+    public String getBaseUrl() {
+        return baseUrl;
+    }
+
+    public void setBaseUrl(String baseUrl) {
+        this.baseUrl = baseUrl;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    public double getTemperature() {
+        return temperature;
+    }
+
+    public void setTemperature(double temperature) {
+        this.temperature = temperature;
+    }
+
+    public int getTimeoutSeconds() {
+        return timeoutSeconds;
+    }
+
+    public void setTimeoutSeconds(int timeoutSeconds) {
+        this.timeoutSeconds = timeoutSeconds;
+    }
+
+    public int getMaxOutputTokens() {
+        return maxOutputTokens;
+    }
+
+    public void setMaxOutputTokens(int maxOutputTokens) {
+        this.maxOutputTokens = maxOutputTokens;
+    }
+
+    public int getMaxInputChars() {
+        return maxInputChars;
+    }
+
+    public void setMaxInputChars(int maxInputChars) {
+        this.maxInputChars = maxInputChars;
+    }
+
+    public String getEmbeddingBaseUrl() {
+        return embeddingBaseUrl;
+    }
+
+    public void setEmbeddingBaseUrl(String embeddingBaseUrl) {
+        this.embeddingBaseUrl = embeddingBaseUrl;
+    }
+
+    public String getEmbeddingApiKey() {
+        return embeddingApiKey;
+    }
+
+    public void setEmbeddingApiKey(String embeddingApiKey) {
+        this.embeddingApiKey = embeddingApiKey;
+    }
+
+    public String getEmbeddingModel() {
+        return embeddingModel;
+    }
+
+    public void setEmbeddingModel(String embeddingModel) {
+        this.embeddingModel = embeddingModel;
+    }
+
+    public String getEmbeddingStyle() {
+        return embeddingStyle;
+    }
+
+    public void setEmbeddingStyle(String embeddingStyle) {
+        this.embeddingStyle = embeddingStyle;
+    }
+
+    public int getEmbeddingTimeout() {
+        return embeddingTimeout;
+    }
+
+    public void setEmbeddingTimeout(int embeddingTimeout) {
+        this.embeddingTimeout = embeddingTimeout;
+    }
+
+    public String getRerankBaseUrl() {
+        return rerankBaseUrl;
+    }
+
+    public void setRerankBaseUrl(String rerankBaseUrl) {
+        this.rerankBaseUrl = rerankBaseUrl;
+    }
+
+    public String getRerankApiKey() {
+        return rerankApiKey;
+    }
+
+    public void setRerankApiKey(String rerankApiKey) {
+        this.rerankApiKey = rerankApiKey;
+    }
+
+    public String getRerankModel() {
+        return rerankModel;
+    }
+
+    public void setRerankModel(String rerankModel) {
+        this.rerankModel = rerankModel;
+    }
+
+    public int getRerankTimeout() {
+        return rerankTimeout;
+    }
+
+    public void setRerankTimeout(int rerankTimeout) {
+        this.rerankTimeout = rerankTimeout;
+    }
+
+    public String getProxyHost() {
+        return proxyHost;
+    }
+
+    public void setProxyHost(String proxyHost) {
+        this.proxyHost = proxyHost;
+    }
+
+    public int getProxyPort() {
+        return proxyPort;
+    }
+
+    public void setProxyPort(int proxyPort) {
+        this.proxyPort = proxyPort;
+    }
+
+    public String getApiStyle() {
+        return apiStyle;
+    }
+
+    public void setApiStyle(String apiStyle) {
+        this.apiStyle = apiStyle;
+    }
+
+    public boolean isCacheEnabled() {
+        return cacheEnabled;
+    }
+
+    public void setCacheEnabled(boolean cacheEnabled) {
+        this.cacheEnabled = cacheEnabled;
+    }
+}

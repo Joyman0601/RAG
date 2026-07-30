@@ -1,0 +1,62 @@
+[
+  {
+    "turn1": "病假需要提交什么材料？",
+    "turn2": "那它的工资怎么算？",
+    "expectedKeys": ["sick-leave-faq"]
+  },
+  {
+    "turn1": "婚假有几天？",
+    "turn2": "申请它需要上传什么证明？",
+    "expectedKeys": ["marriage-leave-faq"]
+  },
+  {
+    "turn1": "女员工产假有多少天？",
+    "turn2": "那男员工的呢？",
+    "expectedKeys": ["maternity-leave-faq"]
+  },
+  {
+    "turn1": "年终奖一般什么时候发放？",
+    "turn2": "领取它有什么前提条件？",
+    "expectedKeys": ["year-end-bonus-faq"]
+  },
+  {
+    "turn1": "怎么申请VPN？",
+    "turn2": "它需要经过谁审批？",
+    "expectedKeys": ["vpn-remote-policy"]
+  },
+  {
+    "turn1": "报销单多久到账？",
+    "turn2": "如果月底25号以后提交它呢？",
+    "expectedKeys": ["reimbursement-cycle-faq"]
+  },
+  {
+    "turn1": "忘记域账号密码怎么办？",
+    "turn2": "如果它自助重置失败呢？",
+    "expectedKeys": ["password-reset-faq"]
+  },
+  {
+    "turn1": "门禁卡什么时候发放？",
+    "turn2": "它丢了要怎么补办？",
+    "expectedKeys": ["access-card-faq"]
+  },
+  {
+    "turn1": "公司多久组织一次体检？",
+    "turn2": "它的报告怎么领取？",
+    "expectedKeys": ["health-checkup-faq"]
+  },
+  {
+    "turn1": "试用期一般多长？",
+    "turn2": "它转正要怎么评估？",
+    "expectedKeys": ["probation-faq"]
+  },
+  {
+    "turn1": "离职需要提前多久提出？",
+    "turn2": "那试用期内提前多久？",
+    "expectedKeys": ["resignation-process"]
+  },
+  {
+    "turn1": "餐补每天多少钱？",
+    "turn2": "请假当天它还算吗？",
+    "expectedKeys": ["meal-allowance-faq"]
+  }
+]

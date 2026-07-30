@@ -1,0 +1,68 @@
+# 生产（演示）profile：--spring.profiles.active=prod
+#
+# 与 pgvector profile 的区别：
+#   - datasource 指向 docker-compose service name（pgvector），而非 localhost
+#   - 全局关掉 debug / seed / CORS（WebCorsConfig 仅 dev/local/default 生效，此处只需保持不激活）
+#   - 上传/LLM 上限/测试 token 等 Step 4 加固开关，全部在此 profile 预留 env var
+#
+# 一条命令启动（配合 docker-compose.prod.yml）：
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+spring:
+  # 生产要用 PostgreSQL + pgvector，重新启用 DataSource 自动配置
+  autoconfigure:
+    exclude: []
+  datasource:
+    url: ${PG_URL:jdbc:postgresql://pgvector:5432/rag}
+    username: ${PG_USER:rag}
+    password: ${PG_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${PG_POOL_MAX:10}
+      minimum-idle: ${PG_POOL_MIN:2}
+      connection-timeout: 10000
+
+server:
+  port: 19090
+  # 生产由 Nginx 反代，X-Forwarded-* 头需生效
+  forward-headers-strategy: framework
+  tomcat:
+    max-threads: ${TOMCAT_MAX_THREADS:100}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:50}
+
+vectorstore:
+  backend: pgvector
+  dimension: ${VECTORSTORE_DIMENSION:4096}
+
+logging:
+  level:
+    root: INFO
+    com.yhl.rag: INFO
+    org.springframework.web: WARN
+    org.hibernate: WARN
+  # 生产不打全量 prompt、不带 debug 输出
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{requestId:-no-request}] %logger{36} - %msg%n"
+
+rag:
+  # 生产必须关，避免把内部 prompt / chunk 明细通过响应回抛
+  debug-enabled: false
+  # 生产用真正的 pgvector 库，seed 加载器已通过 @Profile 排除；此处保留 flag 关闭作双保险
+  demo:
+    seed-enabled: false
+
+# --------------------------------------------------------------------
+# Step 4 加固相关的环境变量占位（当前 profile 只做 env 契约声明，
+# 具体的 filter / 拦截器 / 上传关闭逻辑在 Step 4 补代码时读取这些值）
+# --------------------------------------------------------------------
+demo:
+  # 测试 token 鉴权：面试官通过 URL query 或 header 携带
+  token: ${DEMO_TOKEN:}
+  # 上传接口在演示环境关闭（面试官只读知识库）
+  upload-enabled: ${DEMO_UPLOAD_ENABLED:false}
+  # LLM 日调用上限，超过后返回 "演示额度已用完，请查看录屏"
+  max-daily-llm-calls: ${MAX_DAILY_LLM_CALLS:500}
+  # Bucket4j 应用层限流（Nginx 限流为主，此处为二道防线）
+  rate-limit:
+    enabled: ${DEMO_RATE_LIMIT_ENABLED:false}
+    requests-per-minute: ${DEMO_RATE_LIMIT_RPM:10}
