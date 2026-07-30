@@ -47,9 +47,10 @@ logging:
 rag:
   # 生产必须关，避免把内部 prompt / chunk 明细通过响应回抛
   debug-enabled: false
-  # 生产用真正的 pgvector 库，seed 加载器已通过 @Profile 排除；此处保留 flag 关闭作双保险
+  # 生产（演示）环境启用 seed 自愈：pgvector 卷空时 DemoSeedLoader 自动灌 5 篇脱敏文档，
+  # 已有数据则跳过（listDocuments().isEmpty() 幂等）。想临时关闭改 false 即可。
   demo:
-    seed-enabled: false
+    seed-enabled: true
 
 # --------------------------------------------------------------------
 # Step 4 加固相关的环境变量占位（当前 profile 只做 env 契约声明，
