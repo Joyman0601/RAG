@@ -3,7 +3,7 @@
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Embedding dimension defaults to 4096 (Qwen3-VL-Embedding-8B).
+-- Embedding dimension defaults to 1024 (DashScope text-embedding-v4).
 -- If you switch embedding models, change vector(4096) here and VECTORSTORE_DIMENSION.
 CREATE TABLE IF NOT EXISTS document_chunk (
     chunk_id          TEXT PRIMARY KEY,
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS document_chunk (
     -- IMAGE chunk 的图片引用（对象存储 objectKey / 图片服务 ref）；TEXT chunk 为 null。
     image_ref         TEXT,
     created_at        TIMESTAMPTZ,
-    embedding         vector(4096)
+    embedding         vector(1024)
 );
 
 -- ANN index for cosine distance (<=>). Tune m / ef_construction for recall vs build time.
