@@ -77,7 +77,9 @@ services:
       LLM_RERANK_BASE_URL: ${LLM_RERANK_BASE_URL:-https://api.siliconflow.cn/v1}
       LLM_RERANK_MODEL: ${LLM_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
       # ----- Step 4 加固：测试 token / 上传关闭 / LLM 日上限 -----
-      DEMO_TOKEN: ${DEMO_TOKEN:?DEMO_TOKEN is required}
+      # DEMO_TOKEN 空 → DemoTokenFilter 放行所有 /api/**（面试演示默认开放）
+      # 需要开启 token 校验时，在 .env.prod 里填一个非空值即可
+      DEMO_TOKEN: ${DEMO_TOKEN-}
       DEMO_UPLOAD_ENABLED: ${DEMO_UPLOAD_ENABLED:-false}
       MAX_DAILY_LLM_CALLS: ${MAX_DAILY_LLM_CALLS:-500}
       DEMO_RATE_LIMIT_ENABLED: ${DEMO_RATE_LIMIT_ENABLED:-false}

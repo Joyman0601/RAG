@@ -35,7 +35,7 @@ import org.springframework.web.multipart.MultipartFile;
  * <p>seed 文件放在 classpath:/seed/*.md。走标准 upload 通路，
  * IngestWorker 会在 3-6 秒内异步消费入库。
  */
-@Profile({"dev", "local", "default"})
+@Profile({"dev", "local", "default", "prod"})
 @Component
 public class DemoSeedLoader implements CommandLineRunner {
 
