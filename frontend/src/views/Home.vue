@@ -7,7 +7,7 @@ const highlights = [
 
 const techStack = [
   'Java 17', 'Spring Boot 3', 'PostgreSQL + pgvector (HNSW)',
-  'Qwen3-VL-Embedding-8B (4096d)', 'BM25 + Vector Hybrid (RRF)',
+  'text-embedding-v4 (1024d)', 'BM25 + Vector Hybrid (RRF)',
   'bge-reranker-v2-m3', 'RAGAS 评估', 'Agent / Tool Calling', 'Langfuse',
 ]
 </script>

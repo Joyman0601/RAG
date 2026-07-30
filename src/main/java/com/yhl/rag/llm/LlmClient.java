@@ -20,6 +20,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yhl.rag.demo.LlmQuotaExceededException;
+import com.yhl.rag.demo.LlmQuotaService;
 import com.yhl.rag.observability.LangfuseTracer;
 import com.yhl.rag.observability.MetricsService;
 import com.yhl.rag.observability.RequestContext;
@@ -48,6 +50,7 @@ public class LlmClient {
     private final MetricsService metricsService;
     private final LangfuseTracer langfuseTracer;
     private final RestClient chatRestClient;
+    private final LlmQuotaService demoQuotaService;
 
     @Autowired
     public LlmClient(
@@ -55,13 +58,15 @@ public class LlmClient {
             LlmProperties llmProperties,
             ObjectMapper objectMapper,
             MetricsService metricsService,
-            LangfuseTracer langfuseTracer
+            LangfuseTracer langfuseTracer,
+            LlmQuotaService demoQuotaService
     ) {
         this.llmProperties = llmProperties;
         this.httpClient = buildHttpClient(llmProperties);
         this.objectMapper = objectMapper;
         this.metricsService = metricsService;
         this.langfuseTracer = langfuseTracer;
+        this.demoQuotaService = demoQuotaService;
         this.restClient = restClientBuilder
                 .baseUrl(normalizeBaseUrl(llmProperties.getBaseUrl()))
                 .requestFactory(buildRequestFactory(llmProperties, httpClient))
@@ -80,7 +85,7 @@ public class LlmClient {
             ObjectMapper objectMapper,
             MetricsService metricsService
     ) {
-        this(restClientBuilder, llmProperties, objectMapper, metricsService, null);
+        this(restClientBuilder, llmProperties, objectMapper, metricsService, null, null);
     }
 
     public String generate(String instructions, List<LlmMessage> input) {
@@ -99,6 +104,10 @@ public class LlmClient {
                     LlmErrorType.API_KEY_MISSING,
                     "llm.api-key 为空，请设置环境变量 LLM_API_KEY 或在 application.yml 中配置 llm.api-key"
             );
+        }
+
+        if (demoQuotaService != null) {
+            demoQuotaService.assertAndIncrement();
         }
 
         boolean chatStyle = "chat".equalsIgnoreCase(llmProperties.getApiStyle());
@@ -270,6 +279,16 @@ public class LlmClient {
             logFailure(startNanos, inputChars, outputChars.get(), exception.getErrorType());
             emitter.completeWithError(exception);
             return;
+        }
+
+        if (demoQuotaService != null) {
+            try {
+                demoQuotaService.assertAndIncrement();
+            } catch (LlmQuotaExceededException quotaEx) {
+                logFailure(startNanos, inputChars, outputChars.get(), LlmErrorType.CLIENT_ERROR);
+                emitter.completeWithError(quotaEx);
+                return;
+            }
         }
 
         ResponsesStreamRequest requestBody = new ResponsesStreamRequest(

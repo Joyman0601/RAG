@@ -58,7 +58,8 @@ function statusTag(status?: string): 'success' | 'info' | 'warning' | 'danger' {
 }
 
 const totalChunks = computed(() => chunks.value.length)
-const embeddingDim = 4096 // 简历口径：Qwen3-VL-Embedding-8B 4096 维
+const embeddingDim = 1024
+const embeddingModel = 'text-embedding-v4'
 
 function onUploadClick() {
   ElMessage.info('演示环境为只读，上传接口已关闭。本地开发可参考 README')
@@ -73,7 +74,7 @@ onMounted(loadDocs)
       <div class="toolbar-inner">
         <div class="left">
           <span class="title">共 {{ docs.length }} 篇文档</span>
-          <span class="hint">Embedding 维度：{{ embeddingDim }}（Qwen3-VL-Embedding-8B）</span>
+          <span class="hint">Embedding：{{ embeddingModel }}（{{ embeddingDim }} 维）</span>
         </div>
         <div class="right">
           <el-tooltip content="演示环境为只读，上传接口已关闭" placement="top">
