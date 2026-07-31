@@ -10,7 +10,7 @@
 | 演示 token | 当前空放行 | 无需 header，靠日 LLM 配额 + Nginx 限流 + 关上传接口三层兜底 |
 | Langfuse 观测 | <https://observability.rag.chandlerblog.com> | Viewer 只读账号 `viewer@rag-demo.local` / `RagDemo2026!Read` |
 | Langfuse 公开 trace | [hybrid + rerank 示例](https://observability.rag.chandlerblog.com/project/cms8krwi10005984gmcqunm6j/traces/9df5c93577ba6f140203fd95e7795ea2?timestamp=2026-07-31T09%3A02%3A17.764Z) | 无需登录可直接看 chat message + token usage + latency |
-| 录屏 | *TBD（Step 6 后半段补录）* | 5-8 分钟走完 4 个业务页 + Agent HITL + Langfuse 观测 |
+| 录屏 | [Bilibili · 7 分钟演示](https://www.bilibili.com/video/BV1CYGP6JEZK/) | 5-8 分钟走完 4 个业务页 + Agent HITL + Langfuse 观测 |
 
 **演示环境边界（安全兜底）**：上传接口关闭（只读知识库，5 篇脱敏 markdown）；每日 LLM chat 上限 500 次；Nginx 单 IP 30 req/min；额度耗尽或触限均返回 429 而非 500，若 UI 出现"演示额度已用完"请直接看录屏。
 
