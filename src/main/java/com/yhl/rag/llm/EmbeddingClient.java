@@ -119,7 +119,7 @@ public class EmbeddingClient {
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody), StandardCharsets.UTF_8))
                     .build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response = sendWithOneRetry(request, "embed");
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new LlmException(
                         LlmErrorType.HTTP_ERROR,
@@ -193,7 +193,7 @@ public class EmbeddingClient {
                             StandardCharsets.UTF_8))
                     .build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response = sendWithOneRetry(request, "embedDashscope");
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new LlmException(LlmErrorType.HTTP_ERROR,
                         "DashScope embedding 返回非 2xx，HTTP " + response.statusCode() + "，响应内容：" + response.body());
@@ -256,6 +256,30 @@ public class EmbeddingClient {
         }
 
         return vector;
+    }
+
+    /**
+     * 对瞬时网络错误（Connection reset / connect refused 等 IOException 但非 Timeout）
+     * 重试一次，中间等待 300ms。Timeout / HTTP 4xx-5xx / InterruptedException 都不重试——
+     * 前者说明服务器持续不响应，重试无益；后者是业务级错误，重试只会放大服务器压力和成本。
+     */
+    private HttpResponse<String> sendWithOneRetry(HttpRequest request, String opName)
+            throws IOException, InterruptedException {
+        try {
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (IOException first) {
+            if (isTimeout(first)) {
+                throw first;
+            }
+            log.warn("{} transient IOException, retrying once: {}", opName, first.toString());
+            try {
+                Thread.sleep(300L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw ie;
+            }
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        }
     }
 
     private static HttpClient buildHttpClient(LlmProperties llmProperties) {

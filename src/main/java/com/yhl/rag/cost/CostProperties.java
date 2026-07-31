@@ -9,6 +9,8 @@ public class CostProperties {
 
     private int chatMaxInputTokens = 1500;
 
+    private int agentMaxInputTokens = 4000;
+
     private int ragMaxContextTokens = 1200;
 
     private int ragMaxOutputTokens = 600;
@@ -31,6 +33,14 @@ public class CostProperties {
 
     public void setChatMaxInputTokens(int chatMaxInputTokens) {
         this.chatMaxInputTokens = chatMaxInputTokens;
+    }
+
+    public int getAgentMaxInputTokens() {
+        return agentMaxInputTokens;
+    }
+
+    public void setAgentMaxInputTokens(int agentMaxInputTokens) {
+        this.agentMaxInputTokens = agentMaxInputTokens;
     }
 
     public int getRagMaxContextTokens() {

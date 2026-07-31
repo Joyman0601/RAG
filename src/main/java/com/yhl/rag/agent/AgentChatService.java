@@ -178,7 +178,7 @@ public class AgentChatService {
                     "AGENT_CHAT_DECISION",
                     TOOL_DECISION_PROMPT.formatted(serializeAllowedToolDefinitions(allowedToolNames)),
                     decisionMessages,
-                    costGovernanceService.properties().getChatMaxInputTokens(),
+                    costGovernanceService.properties().getAgentMaxInputTokens(),
                     llmProperties.getMaxOutputTokens()
             );
             LlmGenerationResult decisionResult = llmClient.generateWithUsage(
@@ -306,7 +306,7 @@ public class AgentChatService {
                     "AGENT_CHAT_FINAL",
                     FINAL_ANSWER_PROMPT,
                     finalMessages,
-                    costGovernanceService.properties().getChatMaxInputTokens(),
+                    costGovernanceService.properties().getAgentMaxInputTokens(),
                     llmProperties.getMaxOutputTokens()
             );
             LlmGenerationResult finalResult = llmClient.generateWithUsage(FINAL_ANSWER_PROMPT, finalMessages);

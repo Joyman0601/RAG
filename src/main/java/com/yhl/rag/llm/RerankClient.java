@@ -80,7 +80,7 @@ public class RerankClient {
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody), StandardCharsets.UTF_8))
                     .build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response = sendWithOneRetry(request);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new LlmException(LlmErrorType.HTTP_ERROR,
                         "Rerank 接口返回非 2xx，HTTP " + response.statusCode() + "，响应内容：" + response.body());
@@ -118,6 +118,29 @@ public class RerankClient {
                 .sorted(Comparator.comparingDouble(RerankResult::relevanceScore).reversed())
                 .map(RerankResult::index)
                 .toList();
+    }
+
+    /**
+     * 对瞬时网络错误（Connection reset 等非 Timeout 的 IOException）重试一次，
+     * 中间等待 300ms。Timeout / HTTP 4xx-5xx 都不重试。
+     */
+    private HttpResponse<String> sendWithOneRetry(HttpRequest request)
+            throws IOException, InterruptedException {
+        try {
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (IOException first) {
+            if (isTimeout(first)) {
+                throw first;
+            }
+            log.warn("rerank transient IOException, retrying once: {}", first.toString());
+            try {
+                Thread.sleep(300L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw ie;
+            }
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        }
     }
 
     private static HttpClient buildHttpClient(LlmProperties llmProperties) {

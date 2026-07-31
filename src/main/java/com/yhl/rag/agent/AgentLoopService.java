@@ -341,7 +341,7 @@ public class AgentLoopService {
                         "AGENT_LOOP",
                         loopPrompt,
                         messages,
-                        costGovernanceService.properties().getChatMaxInputTokens(),
+                        costGovernanceService.properties().getAgentMaxInputTokens(),
                         llmProperties.getMaxOutputTokens()
                 );
                 LlmGenerationResult decisionResult = llmClient.generateWithUsage(
