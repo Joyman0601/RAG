@@ -111,6 +111,40 @@ Java Spring Boot project for learning LLM, RAG, and Agent application developmen
 
 结构化日志能告诉你错误发生在链路哪一步，但复现不了模型当时看到的完整上下文，也算不清成本分布。`langfuse.enabled` 打开后，在 LLM 唯一出入口（`LlmClient.generateWithUsage`）按 `requestId` 埋点串成 trace，补齐两点：完整 prompt + 模型原始输出可视化、按 trace/请求类型的 token 成本 dashboard。埋点是 fire-and-forget 异步上报，失败仅 `log.warn` 吞掉，不影响主链路。本地可用 `docker-compose.langfuse.yml` 起一套 Langfuse。
 
+### 生产环境部署
+
+演示环境把 Langfuse 起在同一台 ECS 上，通过 `observability.rag.chandlerblog.com` 子域名对外，Spring Boot 通过 docker 内网直通 `http://langfuse-server:3000` 上报（不绕公网 TLS）。观测栈独立于主 stack，挂了不影响 RAG 服务。
+
+**前置**：
+
+1. DNS 加 `observability` 子域名 A 记录指向服务器公网 IP
+2. `.env.prod` 填齐 5 个 Langfuse 变量（`LANGFUSE_POSTGRES_PASSWORD` / `LANGFUSE_NEXTAUTH_URL` / `LANGFUSE_NEXTAUTH_SECRET` / `LANGFUSE_SALT`），前 3 个用 `openssl rand -base64 24/32` 随机生成
+3. certbot standalone 为子域名单独发一次证书（步骤见 `frontend/nginx.conf` Langfuse server 块注释）
+
+**启动**：
+
+```bash
+# 1. 起 Langfuse stack（复用主 stack 的 rag-net 内网）
+docker compose -f docker-compose.langfuse.yml --env-file .env.prod up -d
+
+# 2. 访问 https://observability.rag.chandlerblog.com 注册 root
+#    注册完毕后 .env.prod 里 LANGFUSE_AUTH_DISABLE_SIGNUP=true，禁掉公开注册防被薅：
+docker compose -f docker-compose.langfuse.yml --env-file .env.prod up -d --force-recreate langfuse-server
+
+# 3. Langfuse UI → New Project → Settings → API Keys → Create new API keys
+#    把 pk/sk 填到 .env.prod：
+#      LANGFUSE_ENABLED=true
+#      LANGFUSE_PUBLIC_KEY=pk-lf-xxx
+#      LANGFUSE_SECRET_KEY=sk-lf-xxx
+
+# 4. 让 Spring Boot 读到新 env，重建 app 容器（restart 不重读 env）
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --force-recreate app
+```
+
+**面试演示 · Read-only 访问**：在 Langfuse project → Settings → Members 创建 Viewer 角色的辅助账号（用户名/密码写进 README 演示凭证段落）；或者对着某条典型 trace 点右上角 `Share` 生成公开只读链接（更适合"打开链接就能看"的场景，不用登录）。
+
+**Langfuse 挂了会怎样**：`LangfuseClient` 异步 fire-and-forget、`log.warn` 静默吞异常，主链路不受影响；`LANGFUSE_ENABLED=false` 时全程 no-op。观测栈单独下线不影响 RAG 服务，符合"业务栈 vs 观测栈解耦"的部署原则。
+
 ## Prompt Caching：生成侧成本优化
 
 Langfuse 省的是「看清成本」，Prompt Caching 省的是「降低成本」——前者观测，后者优化。生成侧大模型按输入 token 计费，而 system prompt、工具定义、few-shot 这些**每次都一样的前缀**反复重算、反复收费。Prompt Caching 让模型服务端按前缀匹配缓存这段 KV 计算结果，命中后这部分输入不再重复计费。

@@ -1,32 +1,72 @@
+# Langfuse 观测栈（Step 5）
+#
+# 独立 stack，和 docker-compose.prod.yml 通过 external network `rag-net` 共享内网。
+# 挂了不影响主链路（RAG 服务继续跑，只是新问答不上报 trace）。
+#
+# 启动顺序（生产）：
+#   1. 先起主 stack（创建 rag-net）：
+#      docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#   2. 再起 Langfuse stack：
+#      docker compose -f docker-compose.langfuse.yml --env-file .env.prod up -d
+#   3. 通过 https://observability.rag.chandlerblog.com 注册 root、建 project 拿 pk/sk
+#   4. 把 pk/sk 填进 .env.prod 的 LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+#   5. 让 app 读到新 env：
+#      docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --force-recreate app
+#
+# 3000 端口仅绑定 127.0.0.1：不对外暴露，首次注册可通过 SSH tunnel
+#   ssh -L 3000:127.0.0.1:3000 user@<ecs-ip>
+# 之后浏览器打开 http://localhost:3000 完成 root 注册；正式访问走 Nginx 反代的子域名。
+
+name: rag-langfuse
+
+networks:
+  # 复用主 stack 创建的网络，实现 app <-> langfuse-server 内网直通
+  rag-net:
+    external: true
+    name: rag-prod_rag-net
+
+volumes:
+  langfuse-pg-data:
+
 services:
   langfuse-server:
     image: docker.m.daocloud.io/langfuse/langfuse:2
+    container_name: rag-langfuse-server
+    restart: unless-stopped
     depends_on:
       langfuse-db:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      # 仅本机可访问，生产走 Nginx 子域名反代对外
+      - "127.0.0.1:3000:3000"
     environment:
-      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
-      NEXTAUTH_SECRET: "local-dev-secret-change-in-prod"
-      SALT: "local-dev-salt-change-in-prod"
-      NEXTAUTH_URL: "http://localhost:3000"
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:?LANGFUSE_POSTGRES_PASSWORD is required}@langfuse-db:5432/langfuse
+      # 必须与用户实际访问的对外 URL 一致，否则 NextAuth 回调 / cookie domain 会错
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:?LANGFUSE_NEXTAUTH_URL is required (e.g. https://observability.rag.chandlerblog.com)}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET is required (openssl rand -base64 32)}
+      SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT is required (openssl rand -base64 32)}
       TELEMETRY_ENABLED: "false"
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      # 演示环境仅面试官/自己访问，关闭公开注册避免被薅
+      AUTH_DISABLE_SIGNUP: ${LANGFUSE_AUTH_DISABLE_SIGNUP:-false}
+    networks:
+      - rag-net
 
   langfuse-db:
-    image: postgres:latest
+    image: postgres:16
+    container_name: rag-langfuse-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:?LANGFUSE_POSTGRES_PASSWORD is required}
       POSTGRES_DB: langfuse
     volumes:
-      - langfuse_pg_data:/var/lib/postgresql
+      # 官方 postgres image 数据目录是 /var/lib/postgresql/data；挂父目录会覆盖 initdb 脚本
+      - langfuse-pg-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
       interval: 5s
       timeout: 5s
       retries: 10
-
-volumes:
-  langfuse_pg_data:
+    networks:
+      - rag-net
