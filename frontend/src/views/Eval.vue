@@ -42,8 +42,8 @@ async function loadEval() {
 
 const summary = computed(() => data.value?.summary)
 
-// 用户简历口径（三次评估的对比数据，实事求是版）
-// 这里展示 A/B 对比：本次实测 vs 简历招牌数据
+// 项目原始声称口径（三次评估的对比数据）
+// 这里展示 A/B 对比：本次实测 vs 项目原始声称数据
 const barOption = computed(() => {
   const s = summary.value
   const current = s

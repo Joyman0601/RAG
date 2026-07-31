@@ -139,4 +139,4 @@ rag:
 MEASUREMENT_RUN=true mvn -o test -Dtest=ConversationalRetrievalHarnessTest
 ```
 
-> **诚实标注**：① 本轮 embedding 走 DashScope `qwen3-vl-embedding`（2560 维，真端点）；**改写/答案的 chat 模型**因 `.env.local` 默认 relay（`co.yes.vg` gpt-5.5）当时返回 **HTTP 402 无可用订阅**，改用 DashScope **`qwen-plus`** 兼容端点跑通——换强模型只会更准，不影响"指代消解提召回"的结论方向。② n=12 是小样本，演示量级而非统计严谨；扩样只需往 `conversational-questions.json` 加对。
+> **诚实标注**：① 本轮 embedding 走 DashScope `qwen3-vl-embedding`（2560 维，真端点）；**改写/答案的 chat 模型**因当时使用的中转 relay 订阅过期返回 **HTTP 402**，改用 DashScope **`qwen-plus`** 兼容端点跑通——换强模型只会更准，不影响"指代消解提召回"的结论方向。② n=12 是小样本，演示量级而非统计严谨；扩样只需往 `conversational-questions.json` 加对。

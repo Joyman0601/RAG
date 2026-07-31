@@ -204,28 +204,28 @@ RAG 还有一个重要优势是可解释性。系统可以把命中的 chunk 作
 
 ## Configuration
 
-The relay used by this project expects GPT text calls on `POST {base-url}/v1/responses`.
+默认走 DashScope OpenAI 兼容端点（`/v1/chat/completions`）+ Qwen 系列模型。切换到其他 provider（自建 vLLM、OpenAI 官方、Responses API 中转等）通过 env 覆盖即可。
 
 ```bash
 LLM_API_KEY=your-api-key
-LLM_BASE_URL=https://co.yes.vg
-LLM_MODEL=gpt-5.5
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen-plus
 LLM_TEMPERATURE=0.7
 LLM_TIMEOUT_SECONDS=30
 LLM_MAX_OUTPUT_TOKENS=800
 LLM_MAX_INPUT_CHARS=2000
-LLM_EMBEDDING_BASE_URL=https://your-embedding-provider
+LLM_EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_EMBEDDING_API_KEY=your-embedding-api-key
-LLM_EMBEDDING_MODEL=text-embedding-3-small
+LLM_EMBEDDING_MODEL=text-embedding-v4
 LLM_EMBEDDING_TIMEOUT=30
 ```
 
-`LLM_EMBEDDING_BASE_URL` must point to a provider that supports `POST /v1/embeddings`. The text relay `LLM_BASE_URL` may not support embeddings.
+`LLM_EMBEDDING_BASE_URL` 必须指向支持 `POST /v1/embeddings` 的 provider；embedding 维度需与 pgvector schema 中 `vector(N)` 的 N 一致（`text-embedding-v4` = 1024 维，切模型时同步改 `db/init/01_schema.sql`）。
 
-API style. Use `responses` for the Responses API relay (default) or `chat` to call `/v1/chat/completions` compatible providers:
+API 风格切换。`chat`（默认，`/v1/chat/completions`，主流兼容端点）或 `responses`（OpenAI Responses API 走 `/v1/responses`）：
 
 ```bash
-LLM_API_STYLE=responses
+LLM_API_STYLE=chat
 ```
 
 Prompt Caching (optional, `chat` style only). Inject `cache_control` on the stable system prefix to cut billed input tokens on cache hits (prefix must be ≥1024 tokens to trigger):

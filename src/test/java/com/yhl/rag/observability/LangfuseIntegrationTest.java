@@ -32,7 +32,7 @@ class LangfuseIntegrationTest {
             tracer.recordGeneration(
                     "integration-trace-001",
                     "rag_ask_integration_test",
-                    "gpt-5.5",
+                    "qwen-plus",
                     "[system] 你是 RAG 助手\n[user] 请假需要什么材料",
                     "请假需要填写请假申请表，并提交给直属主管审批。",
                     128, 20, 350

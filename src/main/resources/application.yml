@@ -48,8 +48,10 @@ rag:
 
 llm:
   api-key: ${LLM_API_KEY:}
-  base-url: ${LLM_BASE_URL:https://co.yes.vg}
-  model: ${LLM_MODEL:gpt-5.5}
+  # 默认走 DashScope OpenAI 兼容端点 + qwen-plus + chat 风格；
+  # 换其他 provider 时通过 env 覆盖，同时把 api-style 切成对应值（chat / responses）。
+  base-url: ${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  model: ${LLM_MODEL:qwen-plus}
   temperature: ${LLM_TEMPERATURE:0.7}
   timeout-seconds: ${LLM_TIMEOUT_SECONDS:30}
   max-output-tokens: ${LLM_MAX_OUTPUT_TOKENS:800}
@@ -65,7 +67,7 @@ llm:
   rerank-timeout: ${LLM_RERANK_TIMEOUT:30}
   proxy-host: ${LLM_PROXY_HOST:}
   proxy-port: ${LLM_PROXY_PORT:0}
-  api-style: ${LLM_API_STYLE:responses}
+  api-style: ${LLM_API_STYLE:chat}   # chat（/v1/chat/completions，主流）| responses（OpenAI Responses API）
   cache-enabled: ${LLM_CACHE_ENABLED:false}
 
 langfuse:

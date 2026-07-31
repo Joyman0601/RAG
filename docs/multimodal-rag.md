@@ -108,4 +108,4 @@ mvn test -Dtest=EmbeddingClientLiveIT
 ```
 端到端跑应用：`.env.local` 已配 `LLM_EMBEDDING_STYLE=dashscope-multimodal` + `RAG_MULTIMODAL_ENABLED=true`，上传含图 pdf/png 后用图里信息发文本 query 即可召回图片（source.modality=IMAGE，imageRef 取回原图）。
 
-> **简历提醒**：技术栈里的 `Qwen3-VL-Embedding-8B（4096维）` 来自 SiliconFlow，**4096 维属实**，但该 OpenAI 端点**不能真做图像检索**。若要让"图文多模态召回"的表述成立，图像路径需走 **DashScope `qwen3-vl-embedding`（2560 维）**——回填简历时要么把多模态模型/维度改成 DashScope，要么明确"图像召回走 DashScope，文本 4096 维走 SiliconFlow"，别把 SiliconFlow 4096 维直接当多模态检索的依据。
+> **模型选型注意**：`Qwen3-VL-Embedding-8B（4096维）` 来自 SiliconFlow，**4096 维属实**，但该 OpenAI 端点**不能真做图像检索**。若要让"图文多模态召回"的表述成立，图像路径需走 **DashScope `qwen3-vl-embedding`（2560 维）**——文档描述要么把多模态模型/维度改成 DashScope，要么明确"图像召回走 DashScope，文本 4096 维走 SiliconFlow"，别把 SiliconFlow 4096 维直接当多模态检索的依据。

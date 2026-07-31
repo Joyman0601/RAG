@@ -36,8 +36,20 @@ buildNumber.properties
 *.tar.gz
 *.rar
 
-# Session
+# Session / 内部备忘录（不进公开仓库）
 next-window-continuation.md
+interview-next-window-continuation.md
+agent_llm_backend_learning_plan.md
+conversational-measurement-report.md
+learning-progress-summary.md
+
+# 面试复习/内部话术（不进公开仓库）
+docs/interview-final-review.md
+docs/interview-agent-project.md
+
+# 内部开发日志/AI 提示词模板（不进公开仓库）
+docs/rag-enhancement-devlog.md
+docs/rag-enhancement-prompts.md
 
 # Python venv
 .venv/

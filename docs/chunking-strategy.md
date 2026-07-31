@@ -73,7 +73,7 @@ rag:
 
 ## 4. 量化
 
-可量化的对比指标是 **FIXED vs MARKDOWN+parent** 的 **Hit@K / context precision**。本轮先把能力与零回归做实，严格的 eval 对比留待**轨道 B 评估集扩展（#6/#5）就绪后**跑，避免用现有 26 题弱标注集得出不可靠数字。
+可量化的对比指标是 **FIXED vs MARKDOWN+parent** 的 **Hit@K / context precision**。本轮先把能力与零回归做实，严格的 eval 对比留待**评估集扩展就绪后**跑，避免用现有 26 题弱标注集得出不可靠数字。
 
 当前已确证（单测级）：
 
@@ -83,4 +83,4 @@ rag:
 - 回填+去重：3 命中子块（c1/c2 同父 p1、c3 无父）→ 上下文出现父块正文一次、c3 原文一次，sources=[c1, c3]。
 - MARKDOWN 入库 → 子块 `parentId` 全部可在 `ParentStore` 查到；删除文档 → 父块同步清除。
 
-> 待办：轨道 B 评估集就绪后，补 FIXED / MARKDOWN+parent / SEMANTIC 三方案的 Hit@K、context precision、context recall 对比表，回填本节与简历量化点。
+> 待办：评估集就绪后，补 FIXED / MARKDOWN+parent / SEMANTIC 三方案的 Hit@K、context precision、context recall 对比表，回填本节。
