@@ -30,34 +30,74 @@ public class RagEvalService {
     private final ObjectMapper objectMapper;
     private final List<RagEvalCase> builtInCases = List.of(
             new RagEvalCase(
+                    "leave-annual-days",
+                    "入职满 3 年年假有多少天？",
+                    "10 天",
+                    List.of(),
+                    List.of("01-年假与请假制度.md"),
+                    null,
+                    "user_001",
+                    List.of("leave")
+            ),
+            new RagEvalCase(
                     "leave-sick-materials",
                     "病假需要提交什么材料？",
-                    "病假 材料",
+                    "二级及以上医院证明",
                     List.of(),
-                    List.of(),
+                    List.of("01-年假与请假制度.md"),
                     null,
                     "user_001",
                     List.of("leave")
             ),
             new RagEvalCase(
-                    "leave-annual-days",
-                    "年假有多少天？",
-                    "年假 天",
+                    "reimbursement-hotel-tier1",
+                    "一线城市出差住宿标准是多少？",
+                    "600 元",
                     List.of(),
-                    List.of(),
-                    null,
-                    "user_001",
-                    List.of("leave")
-            ),
-            new RagEvalCase(
-                    "reimbursement-invoice",
-                    "报销需要发票吗？",
-                    "报销 发票",
-                    List.of(),
-                    List.of(),
+                    List.of("02-差旅报销制度.md"),
                     null,
                     "user_001",
                     List.of("reimbursement")
+            ),
+            new RagEvalCase(
+                    "reimbursement-deadline",
+                    "差旅报销的时限是多少天？",
+                    "15 个工作日",
+                    List.of(),
+                    List.of("02-差旅报销制度.md"),
+                    null,
+                    "user_001",
+                    List.of("reimbursement")
+            ),
+            new RagEvalCase(
+                    "order-cancel-paid",
+                    "PAID 状态的订单可以取消吗？",
+                    "HITL 人工确认",
+                    List.of(),
+                    List.of("03-订单管理FAQ.md"),
+                    null,
+                    "user_001",
+                    List.of("order")
+            ),
+            new RagEvalCase(
+                    "offboarding-notice-period",
+                    "正式员工离职需要提前多久提出？",
+                    "30 日",
+                    List.of(),
+                    List.of("04-离职与知识产权.md"),
+                    null,
+                    "user_001",
+                    List.of("offboarding")
+            ),
+            new RagEvalCase(
+                    "remote-core-hours",
+                    "远程办公的核心工作时间是几点到几点？",
+                    "10:00-16:00",
+                    List.of(),
+                    List.of("05-远程办公政策.md"),
+                    null,
+                    "user_001",
+                    List.of("remote")
             )
     );
 
@@ -114,7 +154,8 @@ public class RagEvalService {
         List<RagSearchResult> retrievedChunks = ragSearchService.search(evalCase.getQuestion());
         RetrievalMetrics retrievalMetrics = calculateRetrievalMetrics(
                 normalizeList(evalCase.getExpectedSourceChunkIds()),
-                retrievedChunks.stream().map(RagSearchResult::getChunkId).toList()
+                normalizeList(evalCase.getExpectedSourceDocumentIds()),
+                retrievedChunks
         );
 
         RagAskResponse askResponse = null;
@@ -182,28 +223,70 @@ public class RagEvalService {
         }
     }
 
-    static RetrievalMetrics calculateRetrievalMetrics(List<String> expectedChunkIds, List<String> retrievedChunkIds) {
-        List<String> expected = normalizeList(expectedChunkIds);
-        List<String> retrieved = normalizeList(retrievedChunkIds);
-        if (expected.isEmpty()) {
-            return new RetrievalMetrics(false, 0.0, 0.0, List.of());
+    /**
+     * chunk 粒度期望列表非空时按 chunk id 匹配（严格）；否则回退到 document 粒度按 filename
+     * 或 documentId 二选一命中，让 seed 灌入的动态 UUID 场景也能配出有意义的 Hit/Recall/MRR。
+     * expectedDocumentTokens 里传的可能是"01-年假与请假制度.md"这类文件名，也可能是数据库 UUID。
+     */
+    static RetrievalMetrics calculateRetrievalMetrics(
+            List<String> expectedChunkIds,
+            List<String> expectedDocumentTokens,
+            List<RagSearchResult> retrievedChunks) {
+        List<String> expChunks = normalizeList(expectedChunkIds);
+        if (!expChunks.isEmpty()) {
+            return calculateByChunkId(expChunks, retrievedChunks);
         }
+        List<String> expDocs = normalizeList(expectedDocumentTokens);
+        if (!expDocs.isEmpty()) {
+            return calculateByDocument(expDocs, retrievedChunks);
+        }
+        return new RetrievalMetrics(false, 0.0, 0.0, List.of());
+    }
 
+    private static RetrievalMetrics calculateByChunkId(List<String> expected, List<RagSearchResult> retrievedChunks) {
         Set<String> expectedSet = new HashSet<>(expected);
         List<String> hitChunkIds = new ArrayList<>();
         int firstHitRank = 0;
-        for (int index = 0; index < retrieved.size(); index++) {
-            String chunkId = retrieved.get(index);
-            if (expectedSet.contains(chunkId)) {
+        for (int index = 0; index < retrievedChunks.size(); index++) {
+            String chunkId = retrievedChunks.get(index).getChunkId();
+            if (chunkId != null && expectedSet.contains(chunkId)) {
                 hitChunkIds.add(chunkId);
                 if (firstHitRank == 0) {
                     firstHitRank = index + 1;
                 }
             }
         }
-        double recallAtK = expected.isEmpty() ? 0.0 : (double) new HashSet<>(hitChunkIds).size() / expectedSet.size();
+        double recallAtK = (double) new HashSet<>(hitChunkIds).size() / expectedSet.size();
         double mrr = firstHitRank == 0 ? 0.0 : 1.0 / firstHitRank;
         return new RetrievalMetrics(!hitChunkIds.isEmpty(), recallAtK, mrr, hitChunkIds);
+    }
+
+    private static RetrievalMetrics calculateByDocument(List<String> expected, List<RagSearchResult> retrievedChunks) {
+        Set<String> expectedSet = new HashSet<>(expected);
+        Set<String> hitDocs = new HashSet<>();
+        List<String> hitChunkIds = new ArrayList<>();
+        int firstHitRank = 0;
+        for (int index = 0; index < retrievedChunks.size(); index++) {
+            RagSearchResult chunk = retrievedChunks.get(index);
+            String matchedToken = null;
+            if (chunk.getFilename() != null && expectedSet.contains(chunk.getFilename())) {
+                matchedToken = chunk.getFilename();
+            } else if (chunk.getDocumentId() != null && expectedSet.contains(chunk.getDocumentId())) {
+                matchedToken = chunk.getDocumentId();
+            }
+            if (matchedToken != null) {
+                hitDocs.add(matchedToken);
+                if (chunk.getChunkId() != null) {
+                    hitChunkIds.add(chunk.getChunkId());
+                }
+                if (firstHitRank == 0) {
+                    firstHitRank = index + 1;
+                }
+            }
+        }
+        double recallAtK = (double) hitDocs.size() / expectedSet.size();
+        double mrr = firstHitRank == 0 ? 0.0 : 1.0 / firstHitRank;
+        return new RetrievalMetrics(!hitDocs.isEmpty(), recallAtK, mrr, hitChunkIds);
     }
 
     private static RagEvalSummary summarize(List<RagEvalResult> results) {
@@ -240,11 +323,15 @@ public class RagEvalService {
         if (expected.isEmpty()) {
             return true;
         }
-        Set<String> actual = sources.stream()
+        Set<String> actualIds = sources.stream()
                 .map(RagSource::getDocumentId)
                 .filter(StringUtils::hasText)
                 .collect(Collectors.toSet());
-        return actual.containsAll(expected);
+        Set<String> actualFilenames = sources.stream()
+                .map(RagSource::getFilename)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
+        return expected.stream().allMatch(exp -> actualIds.contains(exp) || actualFilenames.contains(exp));
     }
 
     private static boolean answerContainsExpectedPhrase(String expectedAnswer, String answer) {

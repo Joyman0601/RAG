@@ -14,11 +14,20 @@ import org.junit.jupiter.api.Test;
 
 class RagEvalServiceTest {
 
+    private static RagSearchResult chunk(String chunkId, String filename, String documentId) {
+        RagSearchResult r = new RagSearchResult();
+        r.setChunkId(chunkId);
+        r.setFilename(filename);
+        r.setDocumentId(documentId);
+        return r;
+    }
+
     @Test
     void calculateRetrievalMetrics_whenExpectedChunkIsHit_returnsHitAtK() {
         RagEvalService.RetrievalMetrics metrics = RagEvalService.calculateRetrievalMetrics(
                 List.of("chunk-2"),
-                List.of("chunk-1", "chunk-2", "chunk-3")
+                List.of(),
+                List.of(chunk("chunk-1", null, null), chunk("chunk-2", null, null), chunk("chunk-3", null, null))
         );
 
         assertThat(metrics.hitAtK()).isTrue();
@@ -29,7 +38,8 @@ class RagEvalServiceTest {
     void calculateRetrievalMetrics_whenMultipleExpectedChunks_returnsCorrectRecallAtK() {
         RagEvalService.RetrievalMetrics metrics = RagEvalService.calculateRetrievalMetrics(
                 List.of("chunk-1", "chunk-2", "chunk-3"),
-                List.of("chunk-2", "chunk-9", "chunk-3")
+                List.of(),
+                List.of(chunk("chunk-2", null, null), chunk("chunk-9", null, null), chunk("chunk-3", null, null))
         );
 
         assertThat(metrics.recallAtK()).isEqualTo(2.0 / 3.0);
@@ -39,7 +49,8 @@ class RagEvalServiceTest {
     void calculateRetrievalMetrics_whenFirstHitRankChanges_returnsCorrectMrr() {
         RagEvalService.RetrievalMetrics metrics = RagEvalService.calculateRetrievalMetrics(
                 List.of("chunk-3"),
-                List.of("chunk-1", "chunk-2", "chunk-3")
+                List.of(),
+                List.of(chunk("chunk-1", null, null), chunk("chunk-2", null, null), chunk("chunk-3", null, null))
         );
 
         assertThat(metrics.mrr()).isEqualTo(1.0 / 3.0);
@@ -49,13 +60,45 @@ class RagEvalServiceTest {
     void calculateRetrievalMetrics_whenNoExpectedChunkIsHit_returnsZeroMetrics() {
         RagEvalService.RetrievalMetrics metrics = RagEvalService.calculateRetrievalMetrics(
                 List.of("chunk-expected"),
-                List.of("chunk-1", "chunk-2", "chunk-3")
+                List.of(),
+                List.of(chunk("chunk-1", null, null), chunk("chunk-2", null, null), chunk("chunk-3", null, null))
         );
 
         assertThat(metrics.hitAtK()).isFalse();
         assertThat(metrics.recallAtK()).isZero();
         assertThat(metrics.mrr()).isZero();
         assertThat(metrics.hitChunkIds()).isEmpty();
+    }
+
+    @Test
+    void calculateRetrievalMetrics_whenExpectedDocumentMatchesByFilename_returnsHit() {
+        RagEvalService.RetrievalMetrics metrics = RagEvalService.calculateRetrievalMetrics(
+                List.of(),
+                List.of("01-年假与请假制度.md"),
+                List.of(
+                        chunk("c1", "05-远程办公政策.md", "doc-5"),
+                        chunk("c2", "01-年假与请假制度.md", "doc-1"),
+                        chunk("c3", "01-年假与请假制度.md", "doc-1")
+                )
+        );
+
+        assertThat(metrics.hitAtK()).isTrue();
+        assertThat(metrics.mrr()).isEqualTo(1.0 / 2.0);
+        assertThat(metrics.recallAtK()).isEqualTo(1.0);
+        assertThat(metrics.hitChunkIds()).containsExactly("c2", "c3");
+    }
+
+    @Test
+    void calculateRetrievalMetrics_whenBothEmpty_returnsZeroMetrics() {
+        RagEvalService.RetrievalMetrics metrics = RagEvalService.calculateRetrievalMetrics(
+                List.of(),
+                List.of(),
+                List.of(chunk("c1", "any.md", "doc"))
+        );
+
+        assertThat(metrics.hitAtK()).isFalse();
+        assertThat(metrics.recallAtK()).isZero();
+        assertThat(metrics.mrr()).isZero();
     }
 
     @Test

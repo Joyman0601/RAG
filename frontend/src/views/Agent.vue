@@ -51,7 +51,7 @@ const scenarios: Scenario[] = [
     desc: '中危工具 · 业务级授权',
     icon: Document,
     color: '#6366f1',
-    prompt: '帮我查一下订单 O-1001 的状态',
+    prompt: '帮我查一下订单 ORD001 的状态',
   },
   {
     key: 'cancel',
