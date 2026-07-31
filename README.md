@@ -1,10 +1,51 @@
 ﻿# RAG Learning
 
-Java Spring Boot project for learning LLM, RAG, and Agent application development.
+> 企业知识库 RAG + Agent 问答系统 · Spring Boot 3.3 + Vue 3 + pgvector + Langfuse · **已通过 Docker Compose 部署到云端 ECS，支持在线演示**。
+
+## 在线演示
+
+| 项 | 值 | 备注 |
+|---|---|---|
+| 主应用 | <https://rag.chandlerblog.com> | Vue3 前端，聊天/知识库/Agent/RAGAS 四页 |
+| 演示 token | 当前空放行 | 无需 header，靠日 LLM 配额 + Nginx 限流 + 关上传接口三层兜底 |
+| Langfuse 观测 | <https://observability.rag.chandlerblog.com> | Viewer 只读账号 `viewer@rag-demo.local` / `RagDemo2026!Read` |
+| Langfuse 公开 trace | *TBD（挑一条带 rerank 的漂亮 trace，Share 后回填）* | 无需登录可直接看 chat message + token cost |
+| 录屏 | *TBD（Step 6 后半段补录）* | 5-8 分钟走完 4 个业务页 + Agent HITL + Langfuse 观测 |
+
+**演示环境边界（安全兜底）**：上传接口关闭（只读知识库，5 篇脱敏 markdown）；每日 LLM chat 上限 500 次；Nginx 单 IP 30 req/min；额度耗尽或触限均返回 429 而非 500，若 UI 出现"演示额度已用完"请直接看录屏。
+
+## 架构总览
+
+```mermaid
+flowchart LR
+  U[面试官 / 审阅者] -->|HTTPS| N[Nginx<br/>TLS + 限流 30r/m]
+  N -->|静态| V[Vue3 前端<br/>Element Plus]
+  N -->|/api| G[三重加固 Filter<br/>DemoToken · UploadGuard · LlmQuota]
+
+  subgraph Backend[Spring Boot 后端]
+    G --> RAG[RAG 主链路<br/>Hybrid + Rerank + Query Rewrite]
+    G --> Agent[Agent Loop<br/>HITL 高危工具拦截]
+    Agent -. 工具调用 .-> RAG
+  end
+
+  RAG --> PG[(pgvector<br/>向量 + BM25 + 权限)]
+  RAG --> LLM[DashScope<br/>qwen-plus + text-embedding-v4]
+  RAG --> RR[SiliconFlow<br/>bge-reranker-v2-m3]
+  Agent --> LLM
+
+  RAG -. 异步 trace .-> LF[Langfuse<br/>Trace + Prompt + Cost]
+  Agent -. 异步 trace .-> LF
+```
+
+- **前端**：Vue 3 + Vite + Element Plus，nginx 一体化容器同时承担静态服务、`/api` 反代、TLS、限流
+- **后端**：Spring Boot 3.3，三重加固 Filter 挡在业务链路前，RAG 主链路（Hybrid + Rerank + 可选 Query Rewrite）与 Agent Loop（LLM tool-call + HITL 高危拦截）共享检索层
+- **数据**：pgvector 一表承担向量检索、BM25 关键词、行级权限；schema 维度硬约束，切模型必须同步改
+- **观测**：Langfuse 独立 stack，Spring Boot 通过内网直通上报（不绕公网 TLS），业务栈挂了不影响 RAG 主链路
+- **外部 LLM**：DashScope（qwen-plus 生成 + text-embedding-v4 检索）+ SiliconFlow（bge-reranker-v2-m3 精排）
 
 ## 项目简介
 
-这是一个基于 Java 17 和 Spring Boot 3.3.7 的企业知识库 RAG 问答系统。项目目标是把企业内部文档上传到系统中，经过文本解析、chunk 切分、embedding 和向量检索后，为用户问题召回相关资料，并基于上下文调用大模型生成答案。系统返回答案的同时由后端生成 sources 引用来源，方便追溯答案依据和排查召回问题。当前阶段采用内存存储实现完整链路，重点验证 RAG 的核心工程流程，不涉及模型训练和真实向量数据库接入。
+Java 17 + Spring Boot 3.3.7 后端 + Vue 3 前端的**企业知识库 RAG + Agent 问答系统**。文档上传（演示环境已关闭）经文本解析、chunk 切分、embedding 与向量检索为用户问题召回相关资料，基于上下文调用大模型生成答案，sources 引用来源由后端根据实际进入 context 的 chunk 生成而非模型编造。除 RAG 主链路外，还实现了 Agent 多轮工具调用（含 HITL 高危工具拦截）、混合检索 + Rerank、RAGAS 评估体系、Prompt Caching 成本优化、Langfuse LLM 可观测性等工程能力。**已通过 Docker Compose 部署到云端 ECS，支持 HTTPS + Nginx 限流 + 演示 token + LLM 调用配额四重加固**。
 
 ## 核心能力
 
