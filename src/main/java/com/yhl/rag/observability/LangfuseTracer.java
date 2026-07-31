@@ -109,6 +109,9 @@ public class LangfuseTracer {
         }
         if (cachedTokens != null) usage.put("input_cached", cachedTokens);
 
+        Instant endInstant = Instant.now();
+        Instant startInstant = endInstant.minusMillis(Math.max(0L, latencyMs));
+
         Map<String, Object> body = new HashMap<>();
         body.put("id", generationId);
         body.put("traceId", traceId);
@@ -117,8 +120,8 @@ public class LangfuseTracer {
         body.put("input", input);
         body.put("output", output);
         body.put("usage", usage);
-        body.put("startTime", timestamp);
-        body.put("endTime", Instant.now().toString());
+        body.put("startTime", startInstant.toString());
+        body.put("endTime", endInstant.toString());
 
         Map<String, Object> event = new HashMap<>();
         event.put("id", UUID.randomUUID().toString());
