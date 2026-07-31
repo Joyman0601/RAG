@@ -141,7 +141,18 @@ docker compose -f docker-compose.langfuse.yml --env-file .env.prod up -d --force
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --force-recreate app
 ```
 
-**面试演示 · Read-only 访问**：在 Langfuse project → Settings → Members 创建 Viewer 角色的辅助账号（用户名/密码写进 README 演示凭证段落）；或者对着某条典型 trace 点右上角 `Share` 生成公开只读链接（更适合"打开链接就能看"的场景，不用登录）。
+### 面试演示凭证
+
+面试官/审阅者可通过以下**只读账号**登录查看 trace 列表、prompt/answer 完整内容、token 成本、latency 分布等观测数据：
+
+| 项 | 值 |
+|---|---|
+| 访问地址 | https://observability.rag.chandlerblog.com |
+| Email | `viewer@rag-demo.local` |
+| Password | `RagDemo2026!Read` |
+| 权限 | Viewer（只读，不能修改/删除任何数据） |
+
+**建议查看动线**：Traces 页 → 挑一条 hybrid+rerank 的问答 → 点进去看顶部 chat 概览（system/user/assistant 三段气泡）→ 展开 `llm_call` generation → 观察 Usage 里的 input/output/cached token 数、latency。
 
 **Langfuse 挂了会怎样**：`LangfuseClient` 异步 fire-and-forget、`log.warn` 静默吞异常，主链路不受影响；`LANGFUSE_ENABLED=false` 时全程 no-op。观测栈单独下线不影响 RAG 服务，符合"业务栈 vs 观测栈解耦"的部署原则。
 
