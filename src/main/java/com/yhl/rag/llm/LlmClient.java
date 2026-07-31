@@ -241,11 +241,16 @@ public class LlmClient {
         logSuccess(startNanos, inputChars, charLength(answer), promptTokens, completionTokens, totalTokens, cachedTokens);
         if (langfuseTracer != null) {
             String traceId = RequestContext.requestIdOr(null);
-            String inputSummary = instructions + "\n" + input.stream()
-                    .map(m -> "[" + m.role() + "] " + m.content())
-                    .reduce("", (a, b) -> a + "\n" + b);
+            List<Map<String, String>> messages = new ArrayList<>();
+            if (instructions != null && !instructions.isEmpty()) {
+                messages.add(Map.of("role", "system", "content", instructions));
+            }
+            for (LlmMessage m : input) {
+                messages.add(Map.of("role", m.role(), "content", m.content()));
+            }
+            Map<String, String> outputMessage = Map.of("role", "assistant", "content", answer);
             langfuseTracer.recordGeneration(traceId, "llm_call",
-                    llmProperties.getModel(), inputSummary, answer,
+                    llmProperties.getModel(), messages, outputMessage,
                     promptTokens, completionTokens, latencyMs, cachedTokens);
         }
         return new LlmGenerationResult(

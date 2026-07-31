@@ -31,8 +31,9 @@ public class LangfuseTracer {
      * @param traceId         来自 RequestContext.requestId()，同一请求内多次 LLM 调用复用同一 trace
      * @param name            generation 名称（如 "rag_ask", "query_rewrite", "agent_loop"）
      * @param model           模型名称
-     * @param input           发给模型的完整 prompt（instructions + messages 拼接摘要）
-     * @param output          模型原始回复
+     * @param input           发给模型的输入（推荐 List<Map<String,String>> message 数组，Langfuse UI
+     *                        会渲染成聊天气泡；也可传 String，DB 会存但 UI 只显示 raw JSON）
+     * @param output          模型回复（推荐 Map.of("role","assistant","content",answer)）
      * @param promptTokens    输入 token 数
      * @param completionTokens 输出 token 数
      * @param latencyMs       本次调用耗时
@@ -42,8 +43,8 @@ public class LangfuseTracer {
             String traceId,
             String name,
             String model,
-            String input,
-            String output,
+            Object input,
+            Object output,
             Integer promptTokens,
             Integer completionTokens,
             long latencyMs,
@@ -70,8 +71,8 @@ public class LangfuseTracer {
             String traceId,
             String name,
             String model,
-            String input,
-            String output,
+            Object input,
+            Object output,
             Integer promptTokens,
             Integer completionTokens,
             long latencyMs
@@ -95,7 +96,7 @@ public class LangfuseTracer {
 
     private Map<String, Object> buildGenerationEvent(
             String generationId, String traceId, String name, String model,
-            String input, String output,
+            Object input, Object output,
             Integer promptTokens, Integer completionTokens, long latencyMs, Integer cachedTokens, String timestamp
     ) {
         Map<String, Object> usage = new HashMap<>();
