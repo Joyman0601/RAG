@@ -58,7 +58,7 @@ public class LangfuseTracer {
         String generationId = UUID.randomUUID().toString();
         String now = Instant.now().toString();
 
-        Map<String, Object> traceEvent = buildTraceEvent(resolvedTraceId, name, now);
+        Map<String, Object> traceEvent = buildTraceEvent(resolvedTraceId, name, now, input, output);
         Map<String, Object> genEvent = buildGenerationEvent(
                 generationId, resolvedTraceId, name, model,
                 input, output, promptTokens, completionTokens, latencyMs, cachedTokens, now);
@@ -80,11 +80,13 @@ public class LangfuseTracer {
         recordGeneration(traceId, name, model, input, output, promptTokens, completionTokens, latencyMs, null);
     }
 
-    private Map<String, Object> buildTraceEvent(String traceId, String name, String timestamp) {
+    private Map<String, Object> buildTraceEvent(String traceId, String name, String timestamp, Object input, Object output) {
         Map<String, Object> body = new HashMap<>();
         body.put("id", traceId);
         body.put("name", name);
         body.put("timestamp", timestamp);
+        if (input != null) body.put("input", input);
+        if (output != null) body.put("output", output);
 
         Map<String, Object> event = new HashMap<>();
         event.put("id", UUID.randomUUID().toString());
